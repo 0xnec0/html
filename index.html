@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MetaMask dApp テストアプリ</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        button {
+            background-color: #f6851b;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 0;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #e2761b;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .info {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            word-break: break-all;
+        }
+        .info label {
+            font-weight: bold;
+            color: #555;
+        }
+        .info p {
+            margin: 5px 0;
+            color: #333;
+        }
+        .status {
+            text-align: center;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>MetaMask dApp 接続テスト</h1>
+
+        <div id="status" class="status disconnected">
+            未接続
+        </div>
+
+        <button id="connectButton" onclick="connectWallet()">
+            MetaMaskに接続
+        </button>
+
+        <button id="getBalanceButton" onclick="getBalance()" disabled>
+            残高を取得
+        </button>
+
+        <button id="sendTransactionButton" onclick="sendTransaction()" disabled>
+            テストトランザクション送信
+        </button>
+
+        <button id="signMessageButton" onclick="signMessage()" disabled>
+            メッセージに署名
+        </button>
+
+        <div class="info">
+            <label>接続アドレス:</label>
+            <p id="accountAddress">-</p>
+        </div>
+
+        <div class="info">
+            <label>チェーンID:</label>
+            <p id="chainId">-</p>
+        </div>
+
+        <div class="info">
+            <label>残高:</label>
+            <p id="balance">-</p>
+        </div>
+
+        <div class="info">
+            <label>署名結果:</label>
+            <p id="signResult">-</p>
+        </div>
+    </div>
+
+    <script>
+        let currentAccount = null;
+        let provider = null;
+
+        // MetaMaskの存在確認
+        window.addEventListener('load', function() {
+            if (typeof window.ethereum !== 'undefined') {
+                console.log('MetaMask is installed!');
+                provider = window.ethereum;
+
+                // アカウント変更イベント
+                ethereum.on('accountsChanged', function (accounts) {
+                    currentAccount = accounts[0];
+                    updateUI();
+                });
+
+                // チェーン変更イベント
+                ethereum.on('chainChanged', function (chainId) {
+                    window.location.reload();
+                });
+            } else {
+                alert('MetaMaskがインストールされていません！');
+            }
+        });
+
+        // ウォレット接続
+        async function connectWallet() {
+            try {
+                const accounts = await ethereum.request({
+                    method: 'eth_requestAccounts'
+                });
+                currentAccount = accounts[0];
+                updateUI();
+                console.log('Connected account:', currentAccount);
+            } catch (error) {
+                console.error('接続エラー:', error);
+                alert('接続に失敗しました: ' + error.message);
+            }
+        }
+
+        // 残高取得
+        async function getBalance() {
+            try {
+                const balance = await ethereum.request({
+                    method: 'eth_getBalance',
+                    params: [currentAccount, 'latest']
+                });
+                const balanceInEth = parseInt(balance, 16) / Math.pow(10, 18);
+                document.getElementById('balance').textContent = balanceInEth.toFixed(4) + ' ETH';
+            } catch (error) {
+                console.error('残高取得エラー:', error);
+                alert('残高の取得に失敗しました');
+            }
+        }
+
+        // トランザクション送信
+        async function sendTransaction() {
+            try {
+                const transactionParameters = {
+                    to: currentAccount,
+                    from: currentAccount,
+                    value: '0x0',
+                    data: '0x'
+                };
+
+                const txHash = await ethereum.request({
+                    method: 'eth_sendTransaction',
+                    params: [transactionParameters],
+                });
+                alert('トランザクションハッシュ: ' + txHash);
+                console.log('Transaction hash:', txHash);
+            } catch (error) {
+                console.error('トランザクションエラー:', error);
+                alert('トランザクションに失敗しました: ' + error.message);
+            }
+        }
+
+        // メッセージ署名
+        async function signMessage() {
+            try {
+                const message = 'Hello from MetaMask dApp!';
+                const signature = await ethereum.request({
+                    method: 'personal_sign',
+                    params: [message, currentAccount],
+                });
+                document.getElementById('signResult').textContent = signature;
+                console.log('Signature:', signature);
+            } catch (error) {
+                console.error('署名エラー:', error);
+                alert('署名に失敗しました: ' + error.message);
+            }
+        }
+
+        // UI更新
+        async function updateUI() {
+            if (currentAccount) {
+                document.getElementById('status').textContent = '接続済み';
+                document.getElementById('status').className = 'status connected';
+                document.getElementById('accountAddress').textContent = currentAccount;
+                document.getElementById('connectButton').textContent = '接続済み';
+                document.getElementById('connectButton').disabled = true;
+
+                // ボタンを有効化
+                document.getElementById('getBalanceButton').disabled = false;
+                document.getElementById('sendTransactionButton').disabled = false;
+                document.getElementById('signMessageButton').disabled = false;
+
+                // チェーンID取得
+                const chainId = await ethereum.request({ method: 'eth_chainId' });
+                document.getElementById('chainId').textContent = parseInt(chainId, 16);
+
+                // 残高を自動取得
+                await getBalance();
+            }
+        }
+    </script>
+</body>
+</html>

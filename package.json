@@ -1,0 +1,29 @@
+{
+  "name": "metamask-synpress-dapp",
+  "version": "1.0.0",
+  "description": "MetaMask dApp connection testing with Synpress",
+  "main": "index.js",
+  "scripts": {
+    "test": "synpress run",
+    "test:headless": "HEADLESS=true synpress run",
+    "serve": "npx http-server . -p 3000",
+    "test:open": "synpress open"
+  },
+  "keywords": [
+    "synpress",
+    "metamask",
+    "dapp",
+    "testing",
+    "cypress"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@synthetixio/synpress": "^3.7.2",
+    "cypress": "^12.17.4",
+    "http-server": "^14.1.1"
+  },
+  "dependencies": {
+    "ethers": "^5.7.2"
+  }
+}
