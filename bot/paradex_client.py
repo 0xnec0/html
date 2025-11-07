@@ -26,7 +26,7 @@ except ImportError:
 class ParadexClient:
     """Client for interacting with Paradex DEX"""
 
-    def __init__(self, env: str, l1_address: str, l1_private_key: str, market: str = "XMR-USD-PERP"):
+    def __init__(self, env: str, l1_address: str, l1_private_key: str, market: str = "DOGE-USD-PERP"):
         """
         Initialize Paradex client
 
@@ -140,7 +140,7 @@ class ParadexClient:
             if not summary:
                 return None
 
-            # Find XMR market
+            # Find market
             results = summary.get('results', []) if isinstance(summary, dict) else summary
             for market_data in results:
                 if market_data.get('market') == self.market:

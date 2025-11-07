@@ -24,7 +24,7 @@ except ImportError:
 class LighterClient:
     """Client for interacting with Lighter DEX"""
 
-    def __init__(self, api_key: str, api_secret: str, private_key: str, market: str = "XMR"):
+    def __init__(self, api_key: str, api_secret: str, private_key: str, market: str = "DOGE"):
         """
         Initialize Lighter client
 
@@ -104,7 +104,7 @@ class LighterClient:
 
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"https://api.lighter.xyz/v1/orderbook/{self.market}"
+                url = f"https://mainnet.zklighter.elliot.ai/api/v1/orderbook/{self.market}"
                 headers = {
                     'X-API-KEY': self.api_key
                 }
@@ -170,7 +170,7 @@ class LighterClient:
 
         try:
             async with aiohttp.ClientSession() as session:
-                url = "https://api.lighter.xyz/v1/orders"
+                url = "https://mainnet.zklighter.elliot.ai/api/v1/orders"
 
                 # Prepare order data
                 timestamp = str(int(time.time() * 1000))
@@ -225,7 +225,7 @@ class LighterClient:
                 # REST API implementation
                 import aiohttp
                 async with aiohttp.ClientSession() as session:
-                    url = f"https://api.lighter.xyz/v1/orders/{order_id}"
+                    url = f"https://mainnet.zklighter.elliot.ai/api/v1/orders/{order_id}"
                     headers = {'X-API-KEY': self.api_key}
 
                     async with session.get(url, headers=headers) as response:
@@ -251,7 +251,7 @@ class LighterClient:
                 # REST API implementation
                 import aiohttp
                 async with aiohttp.ClientSession() as session:
-                    url = "https://api.lighter.xyz/v1/account"
+                    url = "https://mainnet.zklighter.elliot.ai/api/v1/account"
                     headers = {'X-API-KEY': self.api_key}
 
                     async with session.get(url, headers=headers) as response:
@@ -280,7 +280,7 @@ class LighterClient:
                 # REST API implementation
                 import aiohttp
                 async with aiohttp.ClientSession() as session:
-                    url = f"https://api.lighter.xyz/v1/orders/{order_id}"
+                    url = f"https://mainnet.zklighter.elliot.ai/api/v1/orders/{order_id}"
                     headers = {'X-API-KEY': self.api_key}
 
                     async with session.delete(url, headers=headers) as response:

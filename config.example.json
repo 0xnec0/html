@@ -3,13 +3,13 @@
     "env": "TESTNET",
     "l1_address": "0x...",
     "l1_private_key": "0x...",
-    "market": "XMR-USD-PERP"
+    "market": "DOGE-USD-PERP"
   },
   "lighter": {
     "api_key": "your_api_key_here",
     "api_secret": "your_api_secret_here",
     "private_key": "0x...",
-    "market": "XMR"
+    "market": "DOGE"
   },
   "trading": {
     "amount": 0.1,

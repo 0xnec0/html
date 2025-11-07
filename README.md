@@ -1,10 +1,10 @@
-# XMR Trading Bot - Paradex & Lighter DEX
+# DOGE Trading Bot - Paradex & Lighter DEX
 
-🤖 **同時実行取引ボット** - ParadexとLighterで同じタイミングでXMR取引を実行
+🤖 **同時実行取引ボット** - ParadexとLighterで同じタイミングでDOGE取引を実行
 
 ## 概要
 
-このボットは2つのDEX（分散型取引所）で同時にXMRの取引を実行します：
+このボットは2つのDEX（分散型取引所）で同時にDOGEの取引を実行します：
 
 - **Paradex** - Starknetベースの高性能パーペチュアルDEX
 - **Lighter** - オーダーブック型のDEX
@@ -73,13 +73,13 @@ pip install lighter-sdk
 PARADEX_ENV=TESTNET  # または MAINNET
 PARADEX_L1_ADDRESS=0x...
 PARADEX_L1_PRIVATE_KEY=0x...
-PARADEX_MARKET=XMR-USD-PERP
+PARADEX_MARKET=DOGE-USD-PERP
 
 # Lighter設定
 LIGHTER_API_KEY=your_api_key
 LIGHTER_API_SECRET=your_api_secret
 LIGHTER_PRIVATE_KEY=0x...
-LIGHTER_MARKET=XMR
+LIGHTER_MARKET=DOGE
 
 # 取引設定
 TRADE_AMOUNT=0.1
@@ -95,13 +95,13 @@ EXECUTION_TIMEOUT=30
     "env": "TESTNET",
     "l1_address": "0x...",
     "l1_private_key": "0x...",
-    "market": "XMR-USD-PERP"
+    "market": "DOGE-USD-PERP"
   },
   "lighter": {
     "api_key": "your_api_key",
     "api_secret": "your_api_secret",
     "private_key": "0x...",
-    "market": "XMR"
+    "market": "DOGE"
   }
 }
 ```
