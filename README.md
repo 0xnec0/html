@@ -108,6 +108,22 @@ EXECUTION_TIMEOUT=30
 
 ## 使い方
 
+### 🔌 接続テスト（重要！）
+
+まず最初に、取引所への接続が正常か確認しましょう：
+
+```bash
+python main.py test
+```
+
+このコマンドは：
+- ✅ Paradexへの接続確認
+- ✅ Lighterへの接続確認
+- ✅ アカウント情報の表示
+- ✅ 残高情報の表示（利用可能な場合）
+
+**取引を始める前に必ず実行してください！**
+
 ### 価格確認
 
 両取引所の現在価格とスプレッドを確認：
@@ -231,6 +247,7 @@ config.example.json      # 設定例
 
 ### TradingBot
 
+- ✅ 接続テスト（両取引所への接続確認）
 - ✅ 同時価格取得
 - ✅ 同時注文実行
 - ✅ アービトラージ機会検出
@@ -291,10 +308,13 @@ ERROR: Cannot install paradex-py and lighter-sdk because these package versions 
 ### テスト実行
 
 ```bash
-# 価格確認（テストネット）
+# 1. まず接続テスト
+python main.py test
+
+# 2. 価格確認（テストネット）
 python main.py price
 
-# 少額でテスト
+# 3. 少額でテスト
 python main.py trade BUY 0.01 --paradex-only
 ```
 

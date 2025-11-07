@@ -297,3 +297,104 @@ class TradingBot:
             print("\n❌ Arbitrage execution failed")
 
         return execution_result
+
+    async def test_connections(self) -> Dict[str, Any]:
+        """
+        Test connections to both exchanges
+
+        Returns:
+            Dictionary with connection test results
+        """
+        print("\n🔌 Testing connections to exchanges...")
+        print("="*60)
+
+        results = {
+            'paradex': {'connected': False, 'details': None, 'error': None},
+            'lighter': {'connected': False, 'details': None, 'error': None}
+        }
+
+        # Test Paradex connection
+        print("\n📍 Testing Paradex connection...")
+        try:
+            # Try to fetch account balance as connection test
+            account_data = await self.paradex.get_account_balance()
+
+            if account_data:
+                results['paradex']['connected'] = True
+                results['paradex']['details'] = account_data
+                print("  ✅ Paradex: Connected successfully")
+
+                # Display account info
+                if isinstance(account_data, dict):
+                    if 'account' in account_data:
+                        acc = account_data['account']
+                        print(f"     Account ID: {acc.get('account_id', 'N/A')}")
+                        print(f"     Status: {acc.get('status', 'N/A')}")
+
+                    # Show balances if available
+                    if 'balances' in account_data:
+                        balances = account_data['balances']
+                        if balances:
+                            print(f"     Balances: {len(balances)} asset(s)")
+                            for bal in balances[:3]:  # Show first 3
+                                asset = bal.get('asset', 'Unknown')
+                                amount = bal.get('available', '0')
+                                print(f"       - {asset}: {amount}")
+            else:
+                results['paradex']['error'] = "No data returned"
+                print("  ⚠️  Paradex: Connection unclear (no data returned)")
+
+        except Exception as e:
+            results['paradex']['error'] = str(e)
+            print(f"  ❌ Paradex: Connection failed - {e}")
+
+        # Test Lighter connection
+        print("\n📍 Testing Lighter connection...")
+        try:
+            # Try to fetch account balance as connection test
+            account_data = await self.lighter.get_account_balance()
+
+            if account_data:
+                results['lighter']['connected'] = True
+                results['lighter']['details'] = account_data
+                print("  ✅ Lighter: Connected successfully")
+
+                # Display account info
+                if isinstance(account_data, dict):
+                    if 'account' in account_data:
+                        print(f"     Account: {account_data['account']}")
+                    if 'balances' in account_data:
+                        balances = account_data['balances']
+                        if balances:
+                            print(f"     Balances: {len(balances)} asset(s)")
+            else:
+                results['lighter']['error'] = "No data returned"
+                print("  ⚠️  Lighter: Connection unclear (no data returned)")
+
+        except Exception as e:
+            results['lighter']['error'] = str(e)
+            print(f"  ❌ Lighter: Connection failed - {e}")
+
+        # Summary
+        print("\n" + "="*60)
+        print("📊 CONNECTION TEST SUMMARY")
+        print("="*60)
+
+        paradex_status = "✅ Connected" if results['paradex']['connected'] else "❌ Failed"
+        lighter_status = "✅ Connected" if results['lighter']['connected'] else "❌ Failed"
+
+        print(f"  Paradex: {paradex_status}")
+        print(f"  Lighter: {lighter_status}")
+
+        all_connected = results['paradex']['connected'] and results['lighter']['connected']
+
+        if all_connected:
+            print("\n🎉 All exchanges connected successfully!")
+        elif results['paradex']['connected'] or results['lighter']['connected']:
+            print("\n⚠️  Some exchanges failed to connect")
+        else:
+            print("\n❌ All connections failed")
+
+        print("="*60)
+
+        return results

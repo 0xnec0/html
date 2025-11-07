@@ -26,6 +26,9 @@ async def main():
 
     subparsers = parser.add_subparsers(dest='command', help='Commands')
 
+    # Test command
+    test_parser = subparsers.add_parser('test', help='Test connections to both exchanges')
+
     # Price command
     price_parser = subparsers.add_parser('price', help='Get current prices from both exchanges')
 
@@ -81,7 +84,14 @@ async def main():
 
     # Execute command
     try:
-        if args.command == 'price':
+        if args.command == 'test':
+            result = await bot.test_connections()
+
+            # Exit with error if any connection failed
+            if not (result['paradex']['connected'] and result['lighter']['connected']):
+                sys.exit(1)
+
+        elif args.command == 'price':
             await bot.get_prices()
 
         elif args.command == 'trade':
