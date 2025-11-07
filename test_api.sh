@@ -115,10 +115,10 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${BLUE}📊 3. Lighter (Mainnet) API テスト${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "エンドポイント: https://mainnet.zklighter.elliot.ai/api/v1/markets"
+echo "エンドポイント: https://mainnet.zklighter.elliot.ai/markets"
 echo ""
 
-LIGHTER_RESPONSE=$(curl -s -w "\n%{http_code}" "https://mainnet.zklighter.elliot.ai/api/v1/markets" 2>&1)
+LIGHTER_RESPONSE=$(curl -s -w "\n%{http_code}" "https://mainnet.zklighter.elliot.ai/markets" 2>&1)
 LIGHTER_HTTP_CODE=$(echo "$LIGHTER_RESPONSE" | tail -n1)
 LIGHTER_BODY=$(echo "$LIGHTER_RESPONSE" | sed '$d')
 
