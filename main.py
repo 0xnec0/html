@@ -9,6 +9,7 @@ import argparse
 import sys
 from bot.config import Config
 from bot.trading_bot import TradingBot
+from bot.auto_trader import AutoTrader
 
 
 async def main():
@@ -43,6 +44,16 @@ async def main():
 
     # Monitor command
     monitor_parser = subparsers.add_parser('monitor', help='Monitor positions and balances')
+
+    # Auto loop command
+    autoloop_parser = subparsers.add_parser('autoloop', help='Run automated trading loop with random hold times')
+    autoloop_parser.add_argument('side', choices=['BUY', 'SELL'], help='Initial order side')
+    autoloop_parser.add_argument('amount', type=float, help='Amount to trade')
+    autoloop_parser.add_argument('--min-hours', type=float, default=2.0, help='Minimum hold time in hours (default: 2.0)')
+    autoloop_parser.add_argument('--max-hours', type=float, default=3.0, help='Maximum hold time in hours (default: 3.0)')
+    autoloop_parser.add_argument('--max-iterations', type=int, help='Maximum iterations (default: unlimited)')
+    autoloop_parser.add_argument('--paradex-only', action='store_true', help='Only trade on Paradex')
+    autoloop_parser.add_argument('--lighter-only', action='store_true', help='Only trade on Lighter')
 
     args = parser.parse_args()
 
@@ -99,6 +110,18 @@ async def main():
 
         elif args.command == 'monitor':
             await bot.monitor_positions()
+
+        elif args.command == 'autoloop':
+            auto_trader = AutoTrader(bot)
+            await auto_trader.run_loop(
+                side=args.side,
+                amount=args.amount,
+                min_hold_hours=args.min_hours,
+                max_hold_hours=args.max_hours,
+                max_iterations=args.max_iterations,
+                paradex_only=args.paradex_only,
+                lighter_only=args.lighter_only
+            )
 
         else:
             parser.print_help()

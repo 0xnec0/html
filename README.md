@@ -157,6 +157,35 @@ python main.py arbitrage --execute --amount 0.1
 python main.py monitor
 ```
 
+### 🔄 自動取引ループ（NEW!）
+
+ポジションを持って2-3時間の間でランダムにポジションを決済し、ループします：
+
+```bash
+# 基本的な使い方（デフォルト: 2-3時間）
+python main.py autoloop BUY 0.1
+
+# ホールド時間をカスタマイズ（1-2時間）
+python main.py autoloop BUY 0.1 --min-hours 1.0 --max-hours 2.0
+
+# 最大繰り返し回数を指定（10回で停止）
+python main.py autoloop BUY 0.1 --max-iterations 10
+
+# Paradexのみで自動取引
+python main.py autoloop SELL 0.1 --paradex-only
+
+# 完全なカスタマイズ例
+python main.py autoloop BUY 0.05 --min-hours 2.5 --max-hours 4.0 --max-iterations 5
+```
+
+**動作：**
+1. 指定した方向（BUY/SELL）でポジションをオープン
+2. ランダムな時間（2-3時間の間）待機
+3. ポジションをクローズ（反対売買）
+4. 1に戻る（次は反対方向でオープン）
+
+**Ctrl+C**で安全に停止できます。
+
 ## 設定ファイルを使用
 
 ```bash
@@ -172,7 +201,8 @@ bot/
 ├── config.py            # 設定管理
 ├── paradex_client.py    # Paradex接続クライアント
 ├── lighter_client.py    # Lighter接続クライアント
-└── trading_bot.py       # メイン取引ロジック
+├── trading_bot.py       # メイン取引ロジック
+└── auto_trader.py       # 自動取引ループ
 
 main.py                  # エントリーポイント
 requirements.txt         # Python依存関係
@@ -206,6 +236,14 @@ config.example.json      # 設定例
 - ✅ アービトラージ機会検出
 - ✅ アービトラージ自動実行
 - ✅ ポジション監視
+
+### AutoTrader（自動取引ループ）
+
+- ✅ ランダムなホールド時間（2-3時間デフォルト）
+- ✅ 自動的にポジションのオープン/クローズ
+- ✅ 安全な停止機能（Ctrl+C）
+- ✅ 進捗表示とログ出力
+- ✅ カスタマイズ可能な繰り返し回数
 
 ## セキュリティ
 
