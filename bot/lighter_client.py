@@ -6,13 +6,19 @@ Handles connection and trading operations on Lighter
 import asyncio
 from typing import Dict, Any, Optional
 
-# Note: The exact import depends on the lighter-sdk package structure
-# This is a generic implementation that should be adapted based on the actual SDK
+# Try to import SDK, but make it optional
 try:
     from lighter.client import LighterClient as LighterSDK
+    LIGHTER_SDK_AVAILABLE = True
 except ImportError:
-    # Fallback for different SDK structure
-    LighterSDK = None
+    try:
+        # Try alternative import path
+        from lighter_sdk import LighterClient as LighterSDK
+        LIGHTER_SDK_AVAILABLE = True
+    except ImportError:
+        LighterSDK = None
+        LIGHTER_SDK_AVAILABLE = False
+        print("⚠ Lighter SDK not available, using REST API")
 
 
 class LighterClient:

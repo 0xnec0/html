@@ -27,10 +27,17 @@
 ### セットアップ
 
 ```bash
-# リポジトリをクローン
-git clone <repository-url>
-cd html
+# リポジトリをクローン（開発ブランチを指定）
+git clone -b claude/xmr-trading-ui-research-011CUtURFcnaRZf8jgeD7ML7 https://github.com/0xnec0/html.git xmr-trading-bot
+cd xmr-trading-bot
 
+# 自動セットアップ（推奨）
+./setup.sh
+```
+
+または手動セットアップ：
+
+```bash
 # 依存関係のインストール
 pip install -r requirements.txt
 
@@ -38,6 +45,23 @@ pip install -r requirements.txt
 cp .env.example .env
 # または
 cp config.example.json config.json
+```
+
+### ⚠️ SDK依存関係の競合について
+
+**重要**: `paradex_py`と`lighter-sdk`は`eth-account`パッケージのバージョン要件が競合するため、**同時にインストールできません**。
+
+✅ **解決策**: このボットは**SDKなしでも完全に動作します**！
+REST APIを使用してすべての機能（価格取得、注文、監視）が利用可能です。
+
+SDKを使いたい場合は、どちらか一方のみをインストール：
+
+```bash
+# Paradex SDKのみ使用する場合
+pip install paradex_py
+
+# またはLighter SDKのみ使用する場合
+pip install lighter-sdk
 ```
 
 ## 設定
@@ -208,7 +232,17 @@ config.example.json      # 設定例
 ModuleNotFoundError: No module named 'paradex_py'
 ```
 
-→ `pip install -r requirements.txt`を実行してください
+→ SDKはオプションです。`pip install -r requirements.txt`だけで動作します。
+  SDKを使いたい場合は個別にインストール： `pip install paradex_py`
+
+### 依存関係の競合エラー
+
+```
+ERROR: Cannot install paradex-py and lighter-sdk because these package versions have conflicting dependencies.
+```
+
+→ これは既知の問題です。両SDKは同時にインストールできません。
+  **解決策**: SDKなしで使用（REST APIモード）、またはどちらか一方のSDKのみをインストール
 
 ### 価格取得エラー
 
