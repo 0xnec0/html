@@ -1,0 +1,13 @@
+# XMR Trading Bot Requirements
+
+# Paradex SDK
+paradex_py>=0.1.0
+
+# Lighter SDK
+lighter-sdk>=0.1.0
+
+# Additional dependencies
+python-dotenv>=1.0.0
+asyncio>=3.4.3
+aiohttp>=3.9.0
+websockets>=12.0
