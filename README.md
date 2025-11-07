@@ -26,25 +26,49 @@
 
 ### セットアップ
 
-```bash
-# リポジトリをクローン（開発ブランチを指定）
-git clone -b claude/xmr-trading-ui-research-011CUtURFcnaRZf8jgeD7ML7 https://github.com/0xnec0/html.git xmr-trading-bot
-cd xmr-trading-bot
+#### 🚀 クイックスタート（推奨）
 
-# 自動セットアップ（推奨）
-./setup.sh
+```bash
+# リポジトリをクローン
+git clone -b claude/xmr-trading-ui-research-011CUtsNpvMhrKApzi7s9mR4 \
+  https://github.com/0xnec0/html.git doge-trading-bot
+cd doge-trading-bot
+
+# 自動セットアップ（仮想環境も自動作成）
+./quickstart.sh
+
+# 仮想環境をアクティベート（将来のセッションで必要）
+source venv/bin/activate
+
+# 設定ファイルを作成
+cp .env.example .env
+nano .env  # 認証情報を記入
 ```
 
-または手動セットアップ：
+#### 📋 手動セットアップ
+
+Debian/Ubuntu系システムでは仮想環境が必要です：
 
 ```bash
-# 依存関係のインストール
+# 1. 仮想環境を作成
+python3 -m venv venv
+
+# 2. 仮想環境をアクティベート
+source venv/bin/activate
+
+# 3. 依存関係のインストール
 pip install -r requirements.txt
 
-# 設定ファイルの作成
+# 4. 設定ファイルの作成
 cp .env.example .env
 # または
 cp config.example.json config.json
+```
+
+**注意:** 仮想環境を使わずにシステム全体にインストールする場合：
+```bash
+# 非推奨：システムパッケージを破壊する可能性があります
+pip3 install -r requirements.txt --break-system-packages
 ```
 
 ### ⚠️ SDK依存関係の競合について
@@ -273,6 +297,30 @@ config.example.json      # 設定例
 
 ## トラブルシューティング
 
+### pip インストールエラー（externally-managed-environment）
+
+```
+error: externally-managed-environment
+```
+
+**原因:** Debian/Ubuntu 22.04+のPython 3.11+では、システムPythonパッケージの保護のため直接pipインストールが制限されています。
+
+**解決策1:** 仮想環境を使用（推奨）
+```bash
+# クイックスタートスクリプトを使用
+./quickstart.sh
+
+# または手動で仮想環境作成
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+**解決策2:** システム全体にインストール（非推奨）
+```bash
+pip3 install -r requirements.txt --break-system-packages
+```
+
 ### 認証エラー
 
 ```
@@ -302,6 +350,14 @@ ERROR: Cannot install paradex-py and lighter-sdk because these package versions 
 ### 価格取得エラー
 
 → ネットワーク接続を確認し、APIキーが正しいことを確認してください
+
+### 仮想環境が見つからない
+
+次回のセッションで仮想環境を再度アクティベートする必要があります：
+```bash
+cd doge-trading-bot
+source venv/bin/activate
+```
 
 ## 開発
 
