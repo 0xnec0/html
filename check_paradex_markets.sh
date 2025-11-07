@@ -18,8 +18,8 @@ try:
     print('🔎 DOGEを検索中...')
     doge_found = False
     for market in results:
-        if 'DOGE' in market.get('market', '').upper():
-            print(f'  ✓ 見つかりました: {market.get(\"market\")}')
+        if 'DOGE' in market.get('symbol', '').upper():
+            print(f'  ✓ 見つかりました: {market.get(\"symbol\")}')
             doge_found = True
 
     if not doge_found:
@@ -29,7 +29,7 @@ try:
     print('\n📋 利用可能な主要アルトコイン:')
     altcoins = []
     for market in results:
-        market_name = market.get('market', '')
+        market_name = market.get('symbol', '')
         # USD-PERPで終わるもの
         if '-USD-PERP' in market_name:
             coin = market_name.replace('-USD-PERP', '')

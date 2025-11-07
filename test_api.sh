@@ -40,7 +40,7 @@ try:
     data = json.load(sys.stdin)
     results = data.get('results', [])
     for market in results:
-        if 'DOGE' in market.get('market', ''):
+        if 'DOGE' in market.get('symbol', ''):
             print(json.dumps(market, indent=2))
             break
     else:
@@ -87,7 +87,7 @@ try:
     data = json.load(sys.stdin)
     results = data.get('results', [])
     for market in results:
-        if 'DOGE' in market.get('market', ''):
+        if 'DOGE' in market.get('symbol', ''):
             print(json.dumps(market, indent=2))
             break
     else:

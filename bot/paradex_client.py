@@ -143,7 +143,7 @@ class ParadexClient:
             # Find market
             results = summary.get('results', []) if isinstance(summary, dict) else summary
             for market_data in results:
-                if market_data.get('market') == self.market:
+                if market_data.get('symbol') == self.market:
                     # Get mid price from best bid/ask
                     best_bid = float(market_data.get('best_bid', 0))
                     best_ask = float(market_data.get('best_ask', 0))
