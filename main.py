@@ -10,6 +10,7 @@ import sys
 from bot.config import Config
 from bot.trading_bot import TradingBot
 from bot.auto_trader import AutoTrader
+from bot.delta_neutral_strategy import DeltaNeutralStrategy
 
 
 async def main():
@@ -57,6 +58,14 @@ async def main():
     autoloop_parser.add_argument('--max-iterations', type=int, help='Maximum iterations (default: unlimited)')
     autoloop_parser.add_argument('--paradex-only', action='store_true', help='Only trade on Paradex')
     autoloop_parser.add_argument('--lighter-only', action='store_true', help='Only trade on Lighter')
+
+    # Delta Neutral command
+    delta_parser = subparsers.add_parser('delta-neutral', help='Run delta neutral strategy (Paradex LONG + Lighter SHORT)')
+    delta_parser.add_argument('--leverage', type=int, default=10, help='Leverage multiplier (default: 10x)')
+    delta_parser.add_argument('--capital-pct', type=float, default=0.5, help='Percentage of capital to use (default: 0.5 = 50%%)')
+    delta_parser.add_argument('--min-hours', type=float, default=2.0, help='Minimum hold time in hours (default: 2.0)')
+    delta_parser.add_argument('--max-hours', type=float, default=3.0, help='Maximum hold time in hours (default: 3.0)')
+    delta_parser.add_argument('--max-cycles', type=int, help='Maximum cycles (default: unlimited)')
 
     args = parser.parse_args()
 
@@ -131,6 +140,17 @@ async def main():
                 max_iterations=args.max_iterations,
                 paradex_only=args.paradex_only,
                 lighter_only=args.lighter_only
+            )
+
+        elif args.command == 'delta-neutral':
+            strategy = DeltaNeutralStrategy(
+                bot=bot,
+                leverage=args.leverage,
+                capital_percentage=args.capital_pct
+            )
+            await strategy.run_loop(
+                hold_time_hours=(args.min_hours, args.max_hours),
+                max_cycles=args.max_cycles
             )
 
         else:
