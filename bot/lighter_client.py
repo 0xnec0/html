@@ -78,18 +78,27 @@ class LighterClient:
                     available_symbols = []  # Initialize at function scope
 
                     # Get all markets using the API client
+                    print(f"🔍 Lighter: Calling SDK api_client.call_api('/markets')")
                     response = self.client.api_client.call_api(
                         method='GET',
                         url='/markets'
                     )
 
+                    print(f"🔍 Lighter: Response object type: {type(response)}")
+                    print(f"🔍 Lighter: Response has 'data' attr: {hasattr(response, 'data') if response else False}")
+
                     # Parse response - response.data should contain the JSON
                     if response and hasattr(response, 'data'):
+                        print(f"🔍 Lighter: response.data type: {type(response.data)}")
+                        print(f"🔍 Lighter: response.data length: {len(response.data) if response.data else 0}")
+
                         import json
                         # response.data might be a string, parse it
                         if isinstance(response.data, str):
+                            print(f"🔍 Lighter: Parsing response.data as JSON string")
                             markets = json.loads(response.data)
                         else:
+                            print(f"🔍 Lighter: Using response.data directly")
                             markets = response.data
 
                         # Debug: Print response structure
@@ -129,6 +138,12 @@ class LighterClient:
                                         mark_price = float(getattr(market, 'mark_price', 0) or 0)
 
                                     return last_price or mark_price or None
+                        else:
+                            print(f"⚠ Lighter: markets is not a list, type={type(markets)}")
+                    else:
+                        print(f"⚠ Lighter: response has no data or response is None")
+                        if response:
+                            print(f"🔍 Lighter: response attributes: {dir(response)[:20]}")
 
                     print(f"⚠ Market {self.market} not found in Lighter")
                     if available_symbols:

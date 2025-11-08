@@ -200,16 +200,29 @@ class ParadexClient:
                 print(f"🔍 Paradex: Checking market {symbol} vs {self.market}")
 
                 if symbol == self.market:
-                    # Get mid price from best bid/ask
-                    best_bid = float(market_data.get('best_bid', 0))
-                    best_ask = float(market_data.get('best_ask', 0))
-                    last_price = float(market_data.get('last_price', 0))
+                    # Use correct keys from Paradex API
+                    bid = float(market_data.get('bid', 0))
+                    ask = float(market_data.get('ask', 0))
+                    last_traded_price = float(market_data.get('last_traded_price', 0))
+                    mark_price = float(market_data.get('mark_price', 0))
 
-                    print(f"🔍 Paradex: best_bid={best_bid}, best_ask={best_ask}, last_price={last_price}")
+                    print(f"🔍 Paradex: bid={bid}, ask={ask}, last_traded_price={last_traded_price}, mark_price={mark_price}")
 
-                    if best_bid > 0 and best_ask > 0:
-                        return (best_bid + best_ask) / 2
-                    return last_price
+                    # Prefer mid price from bid/ask
+                    if bid > 0 and ask > 0:
+                        mid_price = (bid + ask) / 2
+                        print(f"✅ Paradex price: ${mid_price:.6f} (mid)")
+                        return mid_price
+                    # Fall back to mark price or last traded price
+                    if mark_price > 0:
+                        print(f"✅ Paradex price: ${mark_price:.6f} (mark)")
+                        return mark_price
+                    if last_traded_price > 0:
+                        print(f"✅ Paradex price: ${last_traded_price:.6f} (last)")
+                        return last_traded_price
+
+                    print(f"⚠ Paradex: All prices are 0")
+                    return None
 
             print(f"⚠ Market {self.market} not found in Paradex")
             if results:
