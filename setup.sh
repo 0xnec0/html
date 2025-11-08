@@ -1,5 +1,5 @@
 #!/bin/bash
-# XMR Trading Bot - Setup Script
+# DOGE Trading Bot - Setup Script
 # This script helps you set up the trading bot quickly
 
 set -e  # Exit on error
@@ -40,7 +40,7 @@ command_exists() {
 }
 
 # Main setup
-print_header "XMR Trading Bot - Setup"
+print_header "DOGE Trading Bot - Setup"
 
 # Check Python
 print_info "Checking Python installation..."
@@ -146,8 +146,8 @@ if [[ $configure_now =~ ^[Yy]$ ]]; then
     read -sp "Paradex L1 Private Key (0x...): " paradex_l1_key
     echo ""
 
-    read -p "Paradex Market [XMR-USD-PERP]: " paradex_market
-    paradex_market=${paradex_market:-XMR-USD-PERP}
+    read -p "Paradex Market [DOGE-USD-PERP]: " paradex_market
+    paradex_market=${paradex_market:-DOGE-USD-PERP}
 
     echo ""
 
@@ -159,8 +159,8 @@ if [[ $configure_now =~ ^[Yy]$ ]]; then
     read -sp "Lighter Private Key (0x...): " lighter_private_key
     echo ""
 
-    read -p "Lighter Market [XMR]: " lighter_market
-    lighter_market=${lighter_market:-XMR}
+    read -p "Lighter Market [DOGE]: " lighter_market
+    lighter_market=${lighter_market:-DOGE}
 
     echo ""
 
@@ -230,7 +230,7 @@ print_success "Created run.sh"
 echo ""
 print_header "Setup Complete!"
 echo ""
-print_success "The XMR Trading Bot has been set up successfully!"
+print_success "The DOGE Trading Bot has been set up successfully!"
 echo ""
 print_info "Next steps:"
 echo ""

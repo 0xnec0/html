@@ -1,4 +1,4 @@
-# XMR Trading Bot Requirements
+# DOGE Trading Bot Requirements
 
 # Core dependencies
 python-dotenv>=1.0.0

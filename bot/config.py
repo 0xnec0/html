@@ -56,7 +56,7 @@ class Config:
     @property
     def paradex_market(self) -> str:
         """Paradex market symbol"""
-        return os.getenv('PARADEX_MARKET', self.config_data.get('paradex', {}).get('market', 'XMR-USD-PERP'))
+        return os.getenv('PARADEX_MARKET', self.config_data.get('paradex', {}).get('market', 'DOGE-USD-PERP'))
 
     # Lighter Configuration
     @property
@@ -77,7 +77,7 @@ class Config:
     @property
     def lighter_market(self) -> str:
         """Lighter market symbol"""
-        return os.getenv('LIGHTER_MARKET', self.config_data.get('lighter', {}).get('market', 'XMR'))
+        return os.getenv('LIGHTER_MARKET', self.config_data.get('lighter', {}).get('market', 'DOGE'))
 
     # Trading Configuration
     @property
