@@ -15,8 +15,7 @@ from eth_account.messages import encode_defunct
 
 # Try to import SDK, but make it optional
 try:
-    from paradex_py import Paradex, ParadexSubkey
-    from paradex_py.environment import Environment
+    from paradex_py import Paradex
     PARADEX_SDK_AVAILABLE = True
 except ImportError:
     PARADEX_SDK_AVAILABLE = False
@@ -61,24 +60,27 @@ class ParadexClient:
                 # Environment is a string: "testnet" or "prod"
                 env_str = "testnet" if self.env_name == "TESTNET" else "prod"
 
-                # Use L2-only authentication if L2 credentials provided
-                if l2_address and l2_private_key:
-                    self.client = ParadexSubkey(
+                # Use L2 authentication if L2 private key provided
+                if l2_private_key:
+                    # L2 authentication: requires L1 address + L2 private key
+                    self.client = Paradex(
                         env=env_str,
-                        l2_address=l2_address,
+                        l1_address=l2_address or l1_address,  # Use L2 address if provided, fallback to L1
                         l2_private_key=l2_private_key
                     )
-                    print(f"✓ Paradex initialized with L2 SDK (Subkey)")
-                    print(f"  L2 Address: {self.client.account.l2_address}")
-                else:
-                    # Use L1 authentication (for new accounts)
+                    print(f"✓ Paradex initialized with L2 SDK")
+                    print(f"  L2 Address: {l2_address}")
+                elif l1_address and l1_private_key:
+                    # L1 authentication (for new accounts)
                     self.client = Paradex(
                         env=env_str,
                         l1_address=l1_address,
                         l1_private_key=l1_private_key
                     )
                     print(f"✓ Paradex initialized with L1 SDK")
-                    print(f"  L2 Address: {hex(self.client.account.l2_address)}")
+                    print(f"  L1 Address: {l1_address}")
+                else:
+                    raise ValueError("Either L1 or L2 credentials required")
             except Exception as e:
                 print(f"⚠ SDK init failed: {e}")
                 self.client = None
