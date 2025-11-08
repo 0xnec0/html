@@ -19,7 +19,7 @@ except ImportError:
 class LighterClient:
     """Client for interacting with Lighter DEX using official SDK"""
 
-    def __init__(self, private_key: str, account_index: int, api_key_index: int = 2, market: str = "DOGE"):
+    def __init__(self, private_key: str, account_index: int, api_key_index: int = 2, market: str = "DOGE", proxy_url: str = None):
         """
         Initialize Lighter client with official SDK
 
@@ -28,12 +28,14 @@ class LighterClient:
             account_index: Account index from Lighter
             api_key_index: API key index (2-254, default 2)
             market: Trading market symbol
+            proxy_url: Proxy URL with authentication (optional)
         """
         self.private_key = private_key
         self.account_index = account_index
         self.api_key_index = api_key_index
         self.market = market
         self.base_url = "https://mainnet.zklighter.elliot.ai"
+        self.proxy_url = proxy_url
 
         # Initialize Lighter SDK
         self.client = None
@@ -109,7 +111,7 @@ class LighterClient:
                 url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
 
                 try:
-                    async with session.get(url) as response:
+                    async with session.get(url, proxy=self.proxy_url) as response:
                         if response.status == 200:
                             data = await response.json()
 

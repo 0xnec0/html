@@ -28,7 +28,7 @@ class ParadexClient:
     """Client for interacting with Paradex DEX"""
 
     def __init__(self, env: str, l1_address: str, l1_private_key: str, market: str = "DOGE-USD-PERP",
-                 l2_address: str = None, l2_private_key: str = None):
+                 l2_address: str = None, l2_private_key: str = None, proxy_url: str = None):
         """
         Initialize Paradex client
 
@@ -39,6 +39,7 @@ class ParadexClient:
             market: Trading market symbol
             l2_address: Optional L2 address (for existing accounts)
             l2_private_key: Optional L2 private key (for existing accounts)
+            proxy_url: Proxy URL with authentication (optional)
         """
         self.market = market
         self.l1_address = l1_address
@@ -46,6 +47,7 @@ class ParadexClient:
         self.l2_address = l2_address
         self.l2_private_key = l2_private_key
         self.env_name = env.upper()
+        self.proxy_url = proxy_url
 
         # Set API base URL
         if self.env_name == "TESTNET":
@@ -146,7 +148,7 @@ class ParadexClient:
         try:
             async with aiohttp.ClientSession() as session:
                 if method == "GET":
-                    async with session.get(url, headers=headers) as response:
+                    async with session.get(url, headers=headers, proxy=self.proxy_url) as response:
                         if response.status == 200:
                             return await response.json()
                         else:
@@ -154,7 +156,7 @@ class ParadexClient:
                             print(f"❌ Paradex API error: {response.status} - {error_text}")
                             return None
                 elif method == "POST":
-                    async with session.post(url, json=data, headers=headers) as response:
+                    async with session.post(url, json=data, headers=headers, proxy=self.proxy_url) as response:
                         if response.status in [200, 201]:
                             return await response.json()
                         else:

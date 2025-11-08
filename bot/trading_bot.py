@@ -24,20 +24,27 @@ class TradingBot:
         self.config = config
 
         # Initialize clients
+        proxy_url = config.proxy_url if config.use_proxy else None
+
+        if proxy_url:
+            print(f"🔒 Using proxy: {config.proxy_server}:{config.proxy_port}")
+
         self.paradex = ParadexClient(
             env=config.paradex_env,
             l1_address=config.paradex_l1_address,
             l1_private_key=config.paradex_l1_private_key,
             market=config.paradex_market,
             l2_address=config.paradex_l2_address,
-            l2_private_key=config.paradex_l2_private_key
+            l2_private_key=config.paradex_l2_private_key,
+            proxy_url=proxy_url
         )
 
         self.lighter = LighterClient(
             private_key=config.lighter_private_key,
             account_index=config.lighter_account_index,
             api_key_index=config.lighter_api_key_index,
-            market=config.lighter_market
+            market=config.lighter_market,
+            proxy_url=proxy_url
         )
 
         print("\n✓ Trading bot initialized")

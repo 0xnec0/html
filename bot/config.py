@@ -81,6 +81,45 @@ class Config:
         """Lighter market symbol"""
         return os.getenv('LIGHTER_MARKET', self.config_data.get('lighter', {}).get('market', 'DOGE'))
 
+    # Proxy Configuration
+    @property
+    def use_proxy(self) -> bool:
+        """Whether to use proxy"""
+        use = os.getenv('USE_PROXY', self.config_data.get('proxy', {}).get('use_proxy', 'false'))
+        return use.lower() in ('true', '1', 'yes')
+
+    @property
+    def proxy_server(self) -> str:
+        """Proxy server address"""
+        return os.getenv('PROXY_SERVER', self.config_data.get('proxy', {}).get('server', ''))
+
+    @property
+    def proxy_port(self) -> int:
+        """Proxy port"""
+        port = os.getenv('PROXY_PORT', self.config_data.get('proxy', {}).get('port', '0'))
+        return int(port)
+
+    @property
+    def proxy_username(self) -> str:
+        """Proxy username"""
+        return os.getenv('PROXY_USERNAME', self.config_data.get('proxy', {}).get('username', ''))
+
+    @property
+    def proxy_password(self) -> str:
+        """Proxy password"""
+        return os.getenv('PROXY_PASSWORD', self.config_data.get('proxy', {}).get('password', ''))
+
+    @property
+    def proxy_url(self) -> str:
+        """Get full proxy URL with authentication"""
+        if not self.use_proxy or not self.proxy_server:
+            return None
+
+        if self.proxy_username and self.proxy_password:
+            return f"http://{self.proxy_username}:{self.proxy_password}@{self.proxy_server}:{self.proxy_port}"
+        else:
+            return f"http://{self.proxy_server}:{self.proxy_port}"
+
     # Trading Configuration
     @property
     def trade_amount(self) -> float:
