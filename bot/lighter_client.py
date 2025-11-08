@@ -156,17 +156,23 @@ class LighterClient:
 
                 except Exception as e:
                     print(f"ℹ️  Lighter SDK error, trying REST API: {e}")
+                    import traceback
+                    traceback.print_exc()
 
             # REST API fallback
             import aiohttp
             async with aiohttp.ClientSession() as session:
                 url = f"{self.base_url}/api/v1/markets"
+                print(f"🔍 Lighter REST API: Fetching {url}")
                 async with session.get(url) as response:
+                    print(f"🔍 Lighter REST API: Status {response.status}")
                     if response.status == 200:
                         data = await response.json()
+                        print(f"🔍 Lighter REST API: Response type {type(data)}")
 
                         # Response should be a list of markets
                         if isinstance(data, list):
+                            print(f"🔍 Lighter REST API: Found {len(data)} markets")
                             # Debug: Show available markets
                             available_symbols = []
 
@@ -174,20 +180,27 @@ class LighterClient:
                                 symbol = market.get('symbol', '')
                                 available_symbols.append(symbol)
 
+                                if len(available_symbols) <= 3:
+                                    print(f"🔍 Market: {symbol}, keys: {list(market.keys())[:5]}")
+
                                 if symbol == self.market or symbol.upper() == self.market.upper():
                                     last_price = float(market.get('last_price', 0) or 0)
                                     mark_price = float(market.get('mark_price', 0) or 0)
                                     oracle_price = float(market.get('oracle_price', 0) or 0)
 
+                                    print(f"✅ Lighter price: ${last_price or mark_price or oracle_price:.6f}")
                                     return last_price or mark_price or oracle_price or None
 
                         print(f"⚠ Market {self.market} not found in Lighter")
-                        print(f"ℹ️  Available markets: {', '.join(available_symbols[:10])}")
-                        if len(available_symbols) > 10:
-                            print(f"   ...and {len(available_symbols) - 10} more")
+                        if available_symbols:
+                            print(f"ℹ️  Available markets: {', '.join(available_symbols[:10])}")
+                            if len(available_symbols) > 10:
+                                print(f"   ...and {len(available_symbols) - 10} more")
                         return None
                     else:
                         print(f"⚠ Lighter API returned status {response.status}")
+                        error_text = await response.text()
+                        print(f"🔍 Error response: {error_text[:200]}")
                         return None
 
         except Exception as e:
