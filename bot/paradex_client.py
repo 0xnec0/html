@@ -9,6 +9,7 @@ import json
 import time
 import hashlib
 import hmac
+import math
 from typing import Dict, Any, Optional
 from eth_account import Account
 from eth_account.messages import encode_defunct
@@ -228,6 +229,14 @@ class ParadexClient:
             # Set aggressive limit price to ensure fill
             slippage_multiplier = 1.01 if side.upper() == 'BUY' else 0.99
             limit_price = current_price * slippage_multiplier
+
+            # Round to 0.0001 (tick size for Paradex)
+            # BUY: round up to ensure fill
+            # SELL: round down to ensure fill
+            if side.upper() == 'BUY':
+                limit_price = math.ceil(limit_price * 10000) / 10000
+            else:
+                limit_price = math.floor(limit_price * 10000) / 10000
 
             # Try SDK first
             if self.client and PARADEX_SDK_AVAILABLE:

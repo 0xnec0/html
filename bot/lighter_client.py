@@ -4,6 +4,7 @@ Handles connection and trading operations on Lighter
 """
 
 import asyncio
+import time
 from typing import Dict, Any, Optional
 from decimal import Decimal
 
@@ -65,6 +66,44 @@ class LighterClient:
             print(f"⚠ Lighter SDK not available, using REST API fallback")
 
         print(f"  Market: {self.market}")
+
+        # Cache for market ID lookup
+        self._market_id_cache = {}
+
+    async def _get_market_id_from_api(self, symbol: str) -> Optional[int]:
+        """
+        Get market_id from Lighter API for given symbol
+
+        Args:
+            symbol: Market symbol (e.g., 'JUP', 'DOGE')
+
+        Returns:
+            market_id or None if not found
+        """
+        # Check cache first
+        if symbol in self._market_id_cache:
+            return self._market_id_cache[symbol]
+
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/api/v1/orderBookDetails?market={symbol}"
+                async with session.get(url, proxy=self.proxy_url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if isinstance(data, dict) and 'order_book_details' in data:
+                            for book in data['order_book_details']:
+                                if book.get('symbol', '').upper() == symbol.upper():
+                                    market_id = book.get('market_id')
+                                    if market_id is not None:
+                                        # Cache it
+                                        self._market_id_cache[symbol] = market_id
+                                        print(f"ℹ️  Found market_id for {symbol}: {market_id}")
+                                        return market_id
+        except Exception as e:
+            print(f"⚠ Failed to fetch market_id for {symbol}: {e}")
+
+        return None
 
     async def get_market_price(self) -> Optional[float]:
         """
@@ -167,13 +206,21 @@ class LighterClient:
             if err is not None:
                 raise Exception(f"Failed to create auth token: {err}")
 
+            # Generate unique client order index (timestamp in milliseconds)
+            client_order_index = int(time.time() * 1000)
+
+            # Get market_id from API
+            market_id = await self._get_market_id_from_api(self.market)
+            if market_id is None:
+                raise ValueError(f"Could not find market_id for {self.market}")
+
             # Place limit order with IOC (acts as market order)
-            # Note: Actual method signature may vary - this is based on common patterns
             tx, tx_hash, err = await self.client.create_order(
-                market_index=self._get_market_index(self.market),
+                market_index=market_id,
                 base_amount=str(size),
                 price=str(limit_price),
                 is_buy=(side.upper() == 'BUY'),
+                client_order_index=client_order_index,
                 time_in_force="IOC",  # Immediate or Cancel
             )
 
@@ -199,15 +246,22 @@ class LighterClient:
     def _get_market_index(self, market: str) -> int:
         """
         Get market index for a given market symbol
-        Note: This is a placeholder - actual mapping needed
+        Note: These indices need to be verified with Lighter API
         """
-        # TODO: Get actual market indices from API
+        # Market indices from Lighter protocol
+        # These should be verified via /api/v1/orderBookDetails
         market_indices = {
             'ETH': 0,
             'BTC': 1,
-            'DOGE': 2,  # Placeholder
+            'DOGE': 2,
+            'JUP': 3,  # Jupiter - verify actual index
+            'SOL': 4,
         }
-        return market_indices.get(market, 0)
+        index = market_indices.get(market.upper(), None)
+        if index is None:
+            print(f"⚠ Unknown market {market}, defaulting to index 0")
+            return 0
+        return index
 
     async def get_order_status(self, order_id: str) -> Optional[Dict[str, Any]]:
         """
