@@ -105,17 +105,20 @@ class Config:
         Returns:
             True if configuration is valid, False otherwise
         """
-        required_fields = [
-            ('Paradex L1 Address', self.paradex_l1_address),
-            ('Paradex L1 Private Key', self.paradex_l1_private_key),
-            ('Lighter API Key', self.lighter_api_key),
-            ('Lighter API Secret', self.lighter_api_secret),
-        ]
-
         missing = []
-        for name, value in required_fields:
-            if not value:
-                missing.append(name)
+
+        # Check Paradex: L1 OR L2 credentials required
+        has_l1 = self.paradex_l1_address and self.paradex_l1_private_key
+        has_l2 = self.paradex_l2_address and self.paradex_l2_private_key
+
+        if not (has_l1 or has_l2):
+            missing.append('Paradex credentials (L1 Address+Key OR L2 Address+Key)')
+
+        # Check Lighter credentials
+        if not self.lighter_api_key:
+            missing.append('Lighter API Key')
+        if not self.lighter_api_secret:
+            missing.append('Lighter API Secret')
 
         if missing:
             print(f"❌ Missing required configuration: {', '.join(missing)}")

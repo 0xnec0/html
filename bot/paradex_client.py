@@ -52,8 +52,10 @@ class ParadexClient:
         else:
             self.base_url = "https://api.prod.paradex.trade/v1"
 
-        # Initialize account
-        self.account = Account.from_key(l1_private_key)
+        # Initialize account (only if L1 private key provided)
+        self.account = None
+        if l1_private_key:
+            self.account = Account.from_key(l1_private_key)
 
         # Try SDK initialization if available
         self.client = None
