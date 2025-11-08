@@ -79,7 +79,7 @@ class LighterClient:
 
                     # Get all markets using the API client
                     print(f"🔍 Lighter: Calling SDK api_client.call_api('/markets')")
-                    response = self.client.api_client.call_api(
+                    response = await self.client.api_client.call_api(
                         method='GET',
                         url='/markets'
                     )
