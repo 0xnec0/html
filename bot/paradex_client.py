@@ -16,6 +16,8 @@ from eth_account.messages import encode_defunct
 # Try to import SDK, but make it optional
 try:
     from paradex_py import Paradex
+    from paradex_py.common.order import Order, OrderSide, OrderType
+    from decimal import Decimal
     PARADEX_SDK_AVAILABLE = True
 except ImportError:
     PARADEX_SDK_AVAILABLE = False
@@ -220,20 +222,28 @@ class ParadexClient:
             slippage_multiplier = 1.01 if side.upper() == 'BUY' else 0.99
             limit_price = current_price * slippage_multiplier
 
-            order_params = {
-                'market': self.market,
-                'side': side.upper(),
-                'type': 'LIMIT',
-                'size': str(size),
-                'limit_price': str(limit_price),
-                'time_in_force': 'IOC',  # Immediate or Cancel
-            }
-
             # Try SDK first
-            if self.client:
-                result = self.client.api_client.create_order(**order_params)
+            if self.client and PARADEX_SDK_AVAILABLE:
+                # Use SDK Order object
+                order = Order(
+                    market=self.market,
+                    order_type=OrderType.Limit,
+                    order_side=OrderSide.Buy if side.upper() == 'BUY' else OrderSide.Sell,
+                    size=Decimal(str(size)),
+                    limit_price=Decimal(str(limit_price)),
+                    instruction="IOC"  # Immediate or Cancel
+                )
+                result = self.client.api_client.submit_order(order=order)
             else:
                 # Use REST API
+                order_params = {
+                    'market': self.market,
+                    'side': side.upper(),
+                    'type': 'LIMIT',
+                    'size': str(size),
+                    'limit_price': str(limit_price),
+                    'time_in_force': 'IOC',  # Immediate or Cancel
+                }
                 result = await self._make_request("POST", "/orders", order_params, signed=True)
 
             if result:
@@ -275,7 +285,7 @@ class ParadexClient:
         """
         try:
             if self.client:
-                return self.client.api_client.fetch_account()
+                return self.client.api_client.fetch_account_summary()
             else:
                 return await self._make_request("GET", "/account", signed=True)
         except Exception as e:
