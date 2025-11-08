@@ -54,9 +54,10 @@ class ParadexClient:
         self.client = None
         if PARADEX_SDK_AVAILABLE:
             try:
-                env_obj = Environment.TESTNET if self.env_name == "TESTNET" else Environment.PROD
+                # Environment is a string: "testnet" or "prod"
+                env_str = "testnet" if self.env_name == "TESTNET" else "prod"
                 self.client = Paradex(
-                    env=env_obj,
+                    env=env_str,
                     l1_address=l1_address,
                     l1_private_key=l1_private_key
                 )
