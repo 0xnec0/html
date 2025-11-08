@@ -92,12 +92,17 @@ class LighterClient:
 
                         # Markets should be a list
                         if isinstance(markets, list):
+                            # Debug: Show available markets
+                            available_symbols = []
+
                             # Find DOGE market
                             for market in markets:
                                 if isinstance(market, dict):
                                     symbol = market.get('symbol', '')
                                 else:
                                     symbol = getattr(market, 'symbol', '')
+
+                                available_symbols.append(symbol)
 
                                 if symbol == self.market or symbol.upper() == self.market.upper():
                                     # Get price
@@ -111,6 +116,9 @@ class LighterClient:
                                     return last_price or mark_price or None
 
                     print(f"⚠ Market {self.market} not found in Lighter")
+                    print(f"ℹ️  Available markets: {', '.join(available_symbols[:10])}")
+                    if len(available_symbols) > 10:
+                        print(f"   ...and {len(available_symbols) - 10} more")
                     return None
 
                 except Exception as e:
@@ -126,8 +134,13 @@ class LighterClient:
 
                         # Response should be a list of markets
                         if isinstance(data, list):
+                            # Debug: Show available markets
+                            available_symbols = []
+
                             for market in data:
                                 symbol = market.get('symbol', '')
+                                available_symbols.append(symbol)
+
                                 if symbol == self.market or symbol.upper() == self.market.upper():
                                     last_price = float(market.get('last_price', 0) or 0)
                                     mark_price = float(market.get('mark_price', 0) or 0)
@@ -136,6 +149,9 @@ class LighterClient:
                                     return last_price or mark_price or oracle_price or None
 
                         print(f"⚠ Market {self.market} not found in Lighter")
+                        print(f"ℹ️  Available markets: {', '.join(available_symbols[:10])}")
+                        if len(available_symbols) > 10:
+                            print(f"   ...and {len(available_symbols) - 10} more")
                         return None
                     else:
                         print(f"⚠ Lighter API returned status {response.status}")
