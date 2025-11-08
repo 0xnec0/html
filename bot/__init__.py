@@ -1,5 +1,5 @@
 """
-XMR Trading Bot for Paradex and Lighter DEX
+Multi-DEX Trading Bot for Paradex and Lighter
 Simultaneous trading execution across multiple DEX platforms
 """
 

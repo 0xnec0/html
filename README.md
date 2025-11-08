@@ -1,10 +1,10 @@
-# DOGE Trading Bot - Paradex & Lighter DEX
+# Multi-DEX Trading Bot - Paradex & Lighter
 
-🤖 **同時実行取引ボット** - ParadexとLighterで同じタイミングでDOGE取引を実行
+🤖 **同時実行取引ボット** - ParadexとLighterで同じタイミングで取引を実行
 
 ## 概要
 
-このボットは2つのDEX（分散型取引所）で同時にDOGEの取引を実行します：
+このボットは2つのDEX（分散型取引所）で同時に取引を実行します：
 
 - **Paradex** - Starknetベースの高性能パーペチュアルDEX
 - **Lighter** - オーダーブック型のDEX

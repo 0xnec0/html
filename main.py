@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-XMR Trading Bot - Simultaneous Execution on Paradex and Lighter
+Multi-DEX Trading Bot - Simultaneous Execution on Paradex and Lighter
 Main entry point for the trading bot
 """
 
@@ -15,7 +15,7 @@ from bot.auto_trader import AutoTrader
 async def main():
     """Main function"""
     parser = argparse.ArgumentParser(
-        description='XMR Trading Bot for Paradex and Lighter DEX'
+        description='Multi-DEX Trading Bot for Paradex and Lighter'
     )
 
     parser.add_argument(
@@ -73,7 +73,7 @@ async def main():
 
     # Initialize bot
     print("="*60)
-    print("XMR Trading Bot - Paradex & Lighter")
+    print("Multi-DEX Trading Bot - Paradex & Lighter")
     print("="*60)
 
     try:
