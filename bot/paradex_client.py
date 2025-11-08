@@ -175,65 +175,35 @@ class ParadexClient:
         try:
             # Try SDK first
             if self.client:
-                print(f"🔍 Paradex: Fetching price via SDK for {self.market}")
                 summary = self.client.api_client.fetch_markets_summary({"market": self.market})
-                print(f"🔍 Paradex SDK response type: {type(summary)}")
             else:
                 # Use REST API
-                print(f"🔍 Paradex: Fetching price via REST API for {self.market}")
                 summary = await self._make_request("GET", f"/markets/summary?market={self.market}")
 
             if not summary:
-                print(f"⚠ Paradex: Empty response")
                 return None
 
             # Find market
             results = summary.get('results', []) if isinstance(summary, dict) else summary
-            print(f"🔍 Paradex: Found {len(results)} results")
-
-            if results and len(results) > 0:
-                # Debug first result
-                print(f"🔍 Paradex: First result keys: {list(results[0].keys())[:10]}")
 
             for market_data in results:
-                symbol = market_data.get('symbol')
-                print(f"🔍 Paradex: Checking market {symbol} vs {self.market}")
-
-                if symbol == self.market:
+                if market_data.get('symbol') == self.market:
                     # Use correct keys from Paradex API
                     bid = float(market_data.get('bid', 0))
                     ask = float(market_data.get('ask', 0))
                     last_traded_price = float(market_data.get('last_traded_price', 0))
                     mark_price = float(market_data.get('mark_price', 0))
 
-                    print(f"🔍 Paradex: bid={bid}, ask={ask}, last_traded_price={last_traded_price}, mark_price={mark_price}")
-
                     # Prefer mid price from bid/ask
                     if bid > 0 and ask > 0:
-                        mid_price = (bid + ask) / 2
-                        print(f"✅ Paradex price: ${mid_price:.6f} (mid)")
-                        return mid_price
+                        return (bid + ask) / 2
                     # Fall back to mark price or last traded price
-                    if mark_price > 0:
-                        print(f"✅ Paradex price: ${mark_price:.6f} (mark)")
-                        return mark_price
-                    if last_traded_price > 0:
-                        print(f"✅ Paradex price: ${last_traded_price:.6f} (last)")
-                        return last_traded_price
+                    return mark_price or last_traded_price or None
 
-                    print(f"⚠ Paradex: All prices are 0")
-                    return None
-
-            print(f"⚠ Market {self.market} not found in Paradex")
-            if results:
-                available = [m.get('symbol') for m in results[:5]]
-                print(f"ℹ️  Available markets: {', '.join(available)}")
             return None
 
         except Exception as e:
-            print(f"❌ Paradex price fetch error: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"❌ Paradex error: {e}")
             return None
 
     async def place_market_order(self, side: str, size: float) -> Optional[Dict[str, Any]]:

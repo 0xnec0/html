@@ -72,153 +72,61 @@ class LighterClient:
             Current market price or None if error
         """
         try:
-            # Try SDK first if available
+            # Try SDK first if available (currently not working, falls back to REST API)
             if self.client:
                 try:
-                    available_symbols = []  # Initialize at function scope
-
-                    # Get all markets using the API client
-                    print(f"🔍 Lighter: Calling SDK api_client.call_api('/markets')")
                     response = await self.client.api_client.call_api(
                         method='GET',
                         url='/markets'
                     )
 
-                    print(f"🔍 Lighter: Response object type: {type(response)}")
-                    print(f"🔍 Lighter: Response has 'data' attr: {hasattr(response, 'data') if response else False}")
-
-                    # Parse response - response.data should contain the JSON
                     if response and hasattr(response, 'data'):
-                        print(f"🔍 Lighter: response.data type: {type(response.data)}")
-                        print(f"🔍 Lighter: response.data length: {len(response.data) if response.data else 0}")
-
                         import json
-                        # response.data might be a string, parse it
-                        if isinstance(response.data, str):
-                            print(f"🔍 Lighter: Parsing response.data as JSON string")
-                            markets = json.loads(response.data)
-                        else:
-                            print(f"🔍 Lighter: Using response.data directly")
-                            markets = response.data
+                        markets = json.loads(response.data) if isinstance(response.data, str) else response.data
 
-                        # Debug: Print response structure
-                        print(f"🔍 Lighter SDK response type: {type(markets)}")
                         if isinstance(markets, dict):
-                            print(f"🔍 Response keys: {list(markets.keys())}")
-                            # Maybe markets are nested?
                             if 'markets' in markets:
                                 markets = markets['markets']
                             elif 'data' in markets:
                                 markets = markets['data']
 
-                        # Markets should be a list
                         if isinstance(markets, list):
-                            print(f"🔍 Found {len(markets)} markets")
-                            # Find DOGE market
                             for market in markets:
-                                if isinstance(market, dict):
-                                    symbol = market.get('symbol', '')
-                                    # Debug: print first few markets
-                                    if len(available_symbols) < 3:
-                                        print(f"🔍 Market example: {symbol}, keys: {list(market.keys())[:5]}")
-                                else:
-                                    symbol = getattr(market, 'symbol', '')
-                                    if len(available_symbols) < 3:
-                                        print(f"🔍 Market example (object): {symbol}")
-
-                                available_symbols.append(symbol)
-
-                                if symbol == self.market or symbol.upper() == self.market.upper():
-                                    # Get price
+                                symbol = market.get('symbol', '') if isinstance(market, dict) else getattr(market, 'symbol', '')
+                                if symbol.upper() == self.market.upper():
                                     if isinstance(market, dict):
-                                        last_price = float(market.get('last_price', 0) or 0)
-                                        mark_price = float(market.get('mark_price', 0) or 0)
+                                        return float(market.get('last_price', 0) or market.get('mark_price', 0) or 0) or None
                                     else:
-                                        last_price = float(getattr(market, 'last_price', 0) or 0)
-                                        mark_price = float(getattr(market, 'mark_price', 0) or 0)
+                                        return float(getattr(market, 'last_price', 0) or getattr(market, 'mark_price', 0) or 0) or None
 
-                                    return last_price or mark_price or None
-                        else:
-                            print(f"⚠ Lighter: markets is not a list, type={type(markets)}")
-                    else:
-                        print(f"⚠ Lighter: response has no data or response is None")
-                        if response:
-                            print(f"🔍 Lighter: response attributes: {dir(response)[:20]}")
-
-                    print(f"⚠ Market {self.market} not found in Lighter")
-                    if available_symbols:
-                        print(f"ℹ️  Available markets: {', '.join(available_symbols[:10])}")
-                        if len(available_symbols) > 10:
-                            print(f"   ...and {len(available_symbols) - 10} more")
-                    else:
-                        print(f"ℹ️  No markets found in response")
-                    return None
-
-                except Exception as e:
-                    print(f"ℹ️  Lighter SDK error, trying REST API: {e}")
-                    import traceback
-                    traceback.print_exc()
+                except Exception:
+                    # SDK failed, fall back to REST API
+                    pass
 
             # REST API fallback
             import aiohttp
             async with aiohttp.ClientSession() as session:
-                # Use correct Lighter API endpoint with market parameter
                 url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
-                print(f"🔍 Lighter REST API: Fetching {url}")
 
                 try:
                     async with session.get(url) as response:
-                        print(f"🔍 Lighter REST API: Status {response.status}")
                         if response.status == 200:
                             data = await response.json()
-                            print(f"🔍 Lighter REST API: Response type {type(data)}")
-                            print(f"🔍 Lighter REST API: Response keys: {list(data.keys()) if isinstance(data, dict) else 'not a dict'}")
 
                             # Extract price from orderBookDetails response
-                            if isinstance(data, dict):
-                                # Check for order_book_details array
-                                if 'order_book_details' in data:
-                                    order_books = data['order_book_details']
-                                    print(f"🔍 Found {len(order_books)} markets in order_book_details")
+                            if isinstance(data, dict) and 'order_book_details' in data:
+                                # Find DOGE market in order_book_details array
+                                for book in data['order_book_details']:
+                                    if book.get('symbol', '').upper() == self.market.upper():
+                                        return float(book.get('last_trade_price', 0) or 0) or None
 
-                                    # Find DOGE market
-                                    available_symbols = []
-                                    for book in order_books:
-                                        symbol = book.get('symbol', '')
-                                        available_symbols.append(symbol)
-
-                                        if len(available_symbols) <= 3:
-                                            print(f"🔍 Market: {symbol}, last_trade_price: {book.get('last_trade_price')}")
-
-                                        if symbol.upper() == self.market.upper():
-                                            # Found DOGE market!
-                                            last_trade_price = float(book.get('last_trade_price', 0) or 0)
-                                            print(f"✅ Lighter price: ${last_trade_price:.6f}")
-                                            return last_trade_price
-
-                                    # DOGE not found
-                                    print(f"⚠ Market {self.market} not found in Lighter")
-                                    print(f"ℹ️  Available markets: {', '.join(available_symbols[:10])}")
-                                    if len(available_symbols) > 10:
-                                        print(f"   ...and {len(available_symbols) - 10} more")
-                                    return None
-                                else:
-                                    print(f"⚠ No 'order_book_details' field in response")
-                                    print(f"🔍 Available keys: {list(data.keys())}")
-                                    return None
-                            else:
-                                print(f"⚠ Response is not a dict")
-                                return None
+                            return None
                         else:
-                            error_text = await response.text()
-                            print(f"⚠ Lighter API returned status {response.status}")
-                            print(f"🔍 Error response: {error_text[:200]}")
+                            print(f"❌ Lighter API error: Status {response.status}")
                             return None
 
                 except Exception as e:
-                    print(f"❌ Lighter REST API error: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    print(f"❌ Lighter error: {e}")
                     return None
 
         except Exception as e:

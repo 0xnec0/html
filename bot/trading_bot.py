@@ -72,14 +72,19 @@ class TradingBot:
 
         # Display prices
         if paradex_price:
-            print(f"  Paradex: ${paradex_price:.2f}")
+            print(f"✅ Paradex: ${paradex_price:.4f}")
+        else:
+            print(f"❌ Paradex: Price unavailable")
+
         if lighter_price:
-            print(f"  Lighter: ${lighter_price:.2f}")
+            print(f"✅ Lighter: ${lighter_price:.4f}")
+        else:
+            print(f"❌ Lighter: Price unavailable")
 
         if paradex_price and lighter_price:
             spread = abs(paradex_price - lighter_price)
             spread_pct = (spread / min(paradex_price, lighter_price)) * 100
-            print(f"  Spread: ${spread:.2f} ({spread_pct:.2f}%)")
+            print(f"📊 Spread: ${spread:.4f} ({spread_pct:.2f}%)")
 
         return paradex_price, lighter_price
 
