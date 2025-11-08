@@ -162,78 +162,60 @@ class LighterClient:
             # REST API fallback
             import aiohttp
             async with aiohttp.ClientSession() as session:
-                # Try different API endpoints
-                endpoints = [
-                    '/markets',
-                    '/api/markets',
-                    '/api/v1/markets',
-                    '/v1/markets'
-                ]
+                # Use correct Lighter API endpoint with market parameter
+                url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
+                print(f"🔍 Lighter REST API: Fetching {url}")
 
-                for endpoint in endpoints:
-                    url = f"{self.base_url}{endpoint}"
-                    print(f"🔍 Lighter REST API: Trying {url}")
+                try:
+                    async with session.get(url) as response:
+                        print(f"🔍 Lighter REST API: Status {response.status}")
+                        if response.status == 200:
+                            data = await response.json()
+                            print(f"🔍 Lighter REST API: Response type {type(data)}")
+                            print(f"🔍 Lighter REST API: Response keys: {list(data.keys()) if isinstance(data, dict) else 'not a dict'}")
 
-                    try:
-                        async with session.get(url) as response:
-                            print(f"🔍 Lighter REST API: Status {response.status}")
-                            if response.status == 200:
-                                data = await response.json()
-                                print(f"🔍 Lighter REST API: Response type {type(data)}")
+                            # Extract price from orderBookDetails response
+                            if isinstance(data, dict):
+                                # Try different possible price fields
+                                last_price = float(data.get('last_price', 0) or 0)
+                                mark_price = float(data.get('mark_price', 0) or 0)
+                                oracle_price = float(data.get('oracle_price', 0) or 0)
+                                mid_price = float(data.get('mid_price', 0) or 0)
 
-                                # Response should be a list of markets
-                                if isinstance(data, list):
-                                    print(f"🔍 Lighter REST API: Found {len(data)} markets")
-                                    # Debug: Show available markets
-                                    available_symbols = []
+                                # Check if data is nested
+                                if 'data' in data:
+                                    data_inner = data['data']
+                                    print(f"🔍 Found 'data' field: {type(data_inner)}")
+                                    if isinstance(data_inner, dict):
+                                        last_price = last_price or float(data_inner.get('last_price', 0) or 0)
+                                        mark_price = mark_price or float(data_inner.get('mark_price', 0) or 0)
+                                        oracle_price = oracle_price or float(data_inner.get('oracle_price', 0) or 0)
+                                        mid_price = mid_price or float(data_inner.get('mid_price', 0) or 0)
 
-                                    for market in data:
-                                        symbol = market.get('symbol', '')
-                                        available_symbols.append(symbol)
+                                print(f"🔍 Lighter prices: last={last_price}, mark={mark_price}, oracle={oracle_price}, mid={mid_price}")
 
-                                        if len(available_symbols) <= 3:
-                                            print(f"🔍 Market: {symbol}, keys: {list(market.keys())[:5]}")
-
-                                        if symbol == self.market or symbol.upper() == self.market.upper():
-                                            last_price = float(market.get('last_price', 0) or 0)
-                                            mark_price = float(market.get('mark_price', 0) or 0)
-                                            oracle_price = float(market.get('oracle_price', 0) or 0)
-
-                                            print(f"✅ Lighter price: ${last_price or mark_price or oracle_price:.6f}")
-                                            return last_price or mark_price or oracle_price or None
-
-                                    print(f"⚠ Market {self.market} not found in Lighter")
-                                    if available_symbols:
-                                        print(f"ℹ️  Available markets: {', '.join(available_symbols[:10])}")
-                                        if len(available_symbols) > 10:
-                                            print(f"   ...and {len(available_symbols) - 10} more")
+                                price = last_price or mark_price or oracle_price or mid_price
+                                if price > 0:
+                                    print(f"✅ Lighter price: ${price:.6f}")
+                                    return price
+                                else:
+                                    print(f"⚠ All price fields are 0 or missing")
+                                    print(f"🔍 Full response: {data}")
                                     return None
-                                elif isinstance(data, dict):
-                                    # Maybe wrapped in a data field or different structure
-                                    print(f"🔍 Response is dict with keys: {list(data.keys())}")
-                                    if 'data' in data and isinstance(data['data'], list):
-                                        # Process nested list
-                                        for market in data['data']:
-                                            symbol = market.get('symbol', '')
-                                            if symbol == self.market or symbol.upper() == self.market.upper():
-                                                last_price = float(market.get('last_price', 0) or 0)
-                                                mark_price = float(market.get('mark_price', 0) or 0)
-                                                oracle_price = float(market.get('oracle_price', 0) or 0)
-                                                print(f"✅ Lighter price: ${last_price or mark_price or oracle_price:.6f}")
-                                                return last_price or mark_price or oracle_price or None
-                                    return None
+                            else:
+                                print(f"⚠ Response is not a dict")
+                                return None
+                        else:
+                            error_text = await response.text()
+                            print(f"⚠ Lighter API returned status {response.status}")
+                            print(f"🔍 Error response: {error_text[:200]}")
+                            return None
 
-                            elif response.status != 404:
-                                # Non-404 error, show it
-                                error_text = await response.text()
-                                print(f"⚠ Error {response.status}: {error_text[:200]}")
-
-                    except Exception as e:
-                        print(f"⚠ Error trying {endpoint}: {e}")
-                        continue
-
-                print(f"❌ All Lighter API endpoints failed")
-                return None
+                except Exception as e:
+                    print(f"❌ Lighter REST API error: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    return None
 
         except Exception as e:
             print(f"❌ Lighter price fetch error: {e}")
