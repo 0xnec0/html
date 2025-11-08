@@ -72,54 +72,74 @@ class LighterClient:
             Current market price or None if error
         """
         try:
-            if not self.client:
-                print(f"⚠ Lighter SDK required for market data")
-                return None
+            # Try SDK first if available
+            if self.client:
+                try:
+                    # Get all markets using the API client
+                    response = self.client.api_client.call_api(
+                        method='GET',
+                        url='/markets'
+                    )
 
-            # Use ApiClient to call markets endpoint
-            try:
-                # Get all markets using the API client
-                response = self.client.api_client.call_api(
-                    method='GET',
-                    url='/markets'
-                )
+                    # Parse response - response.data should contain the JSON
+                    if response and hasattr(response, 'data'):
+                        import json
+                        # response.data might be a string, parse it
+                        if isinstance(response.data, str):
+                            markets = json.loads(response.data)
+                        else:
+                            markets = response.data
 
-                # Parse response - response.data should contain the JSON
-                if response and hasattr(response, 'data'):
-                    import json
-                    # response.data might be a string, parse it
-                    if isinstance(response.data, str):
-                        markets = json.loads(response.data)
-                    else:
-                        markets = response.data
-
-                    # Markets should be a list
-                    if isinstance(markets, list):
-                        # Find DOGE market
-                        for market in markets:
-                            if isinstance(market, dict):
-                                symbol = market.get('symbol', '')
-                            else:
-                                symbol = getattr(market, 'symbol', '')
-
-                            if symbol == self.market or symbol.upper() == self.market.upper():
-                                # Get price
+                        # Markets should be a list
+                        if isinstance(markets, list):
+                            # Find DOGE market
+                            for market in markets:
                                 if isinstance(market, dict):
+                                    symbol = market.get('symbol', '')
+                                else:
+                                    symbol = getattr(market, 'symbol', '')
+
+                                if symbol == self.market or symbol.upper() == self.market.upper():
+                                    # Get price
+                                    if isinstance(market, dict):
+                                        last_price = float(market.get('last_price', 0) or 0)
+                                        mark_price = float(market.get('mark_price', 0) or 0)
+                                    else:
+                                        last_price = float(getattr(market, 'last_price', 0) or 0)
+                                        mark_price = float(getattr(market, 'mark_price', 0) or 0)
+
+                                    return last_price or mark_price or None
+
+                    print(f"⚠ Market {self.market} not found in Lighter")
+                    return None
+
+                except Exception as e:
+                    print(f"ℹ️  Lighter SDK error, trying REST API: {e}")
+
+            # REST API fallback
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/api/v1/markets"
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+
+                        # Response should be a list of markets
+                        if isinstance(data, list):
+                            for market in data:
+                                symbol = market.get('symbol', '')
+                                if symbol == self.market or symbol.upper() == self.market.upper():
                                     last_price = float(market.get('last_price', 0) or 0)
                                     mark_price = float(market.get('mark_price', 0) or 0)
-                                else:
-                                    last_price = float(getattr(market, 'last_price', 0) or 0)
-                                    mark_price = float(getattr(market, 'mark_price', 0) or 0)
+                                    oracle_price = float(market.get('oracle_price', 0) or 0)
 
-                                return last_price or mark_price or None
+                                    return last_price or mark_price or oracle_price or None
 
-                print(f"⚠ Market {self.market} not found in Lighter")
-                return None
-
-            except Exception as e:
-                # Fallback: just return None so trading can still work
-                print(f"ℹ️  Lighter price unavailable (using order-based pricing): {e}")
-                return None
+                        print(f"⚠ Market {self.market} not found in Lighter")
+                        return None
+                    else:
+                        print(f"⚠ Lighter API returned status {response.status}")
+                        return None
 
         except Exception as e:
             print(f"❌ Lighter price fetch error: {e}")
