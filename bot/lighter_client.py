@@ -75,6 +75,8 @@ class LighterClient:
             # Try SDK first if available
             if self.client:
                 try:
+                    available_symbols = []  # Initialize at function scope
+
                     # Get all markets using the API client
                     response = self.client.api_client.call_api(
                         method='GET',
@@ -90,17 +92,30 @@ class LighterClient:
                         else:
                             markets = response.data
 
+                        # Debug: Print response structure
+                        print(f"🔍 Lighter SDK response type: {type(markets)}")
+                        if isinstance(markets, dict):
+                            print(f"🔍 Response keys: {list(markets.keys())}")
+                            # Maybe markets are nested?
+                            if 'markets' in markets:
+                                markets = markets['markets']
+                            elif 'data' in markets:
+                                markets = markets['data']
+
                         # Markets should be a list
                         if isinstance(markets, list):
-                            # Debug: Show available markets
-                            available_symbols = []
-
+                            print(f"🔍 Found {len(markets)} markets")
                             # Find DOGE market
                             for market in markets:
                                 if isinstance(market, dict):
                                     symbol = market.get('symbol', '')
+                                    # Debug: print first few markets
+                                    if len(available_symbols) < 3:
+                                        print(f"🔍 Market example: {symbol}, keys: {list(market.keys())[:5]}")
                                 else:
                                     symbol = getattr(market, 'symbol', '')
+                                    if len(available_symbols) < 3:
+                                        print(f"🔍 Market example (object): {symbol}")
 
                                 available_symbols.append(symbol)
 
@@ -116,9 +131,12 @@ class LighterClient:
                                     return last_price or mark_price or None
 
                     print(f"⚠ Market {self.market} not found in Lighter")
-                    print(f"ℹ️  Available markets: {', '.join(available_symbols[:10])}")
-                    if len(available_symbols) > 10:
-                        print(f"   ...and {len(available_symbols) - 10} more")
+                    if available_symbols:
+                        print(f"ℹ️  Available markets: {', '.join(available_symbols[:10])}")
+                        if len(available_symbols) > 10:
+                            print(f"   ...and {len(available_symbols) - 10} more")
+                    else:
+                        print(f"ℹ️  No markets found in response")
                     return None
 
                 except Exception as e:

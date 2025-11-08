@@ -175,30 +175,52 @@ class ParadexClient:
         try:
             # Try SDK first
             if self.client:
+                print(f"🔍 Paradex: Fetching price via SDK for {self.market}")
                 summary = self.client.api_client.fetch_markets_summary({"market": self.market})
+                print(f"🔍 Paradex SDK response type: {type(summary)}")
             else:
                 # Use REST API
+                print(f"🔍 Paradex: Fetching price via REST API for {self.market}")
                 summary = await self._make_request("GET", f"/markets/summary?market={self.market}")
 
             if not summary:
+                print(f"⚠ Paradex: Empty response")
                 return None
 
             # Find market
             results = summary.get('results', []) if isinstance(summary, dict) else summary
+            print(f"🔍 Paradex: Found {len(results)} results")
+
+            if results and len(results) > 0:
+                # Debug first result
+                print(f"🔍 Paradex: First result keys: {list(results[0].keys())[:10]}")
+
             for market_data in results:
-                if market_data.get('symbol') == self.market:
+                symbol = market_data.get('symbol')
+                print(f"🔍 Paradex: Checking market {symbol} vs {self.market}")
+
+                if symbol == self.market:
                     # Get mid price from best bid/ask
                     best_bid = float(market_data.get('best_bid', 0))
                     best_ask = float(market_data.get('best_ask', 0))
+                    last_price = float(market_data.get('last_price', 0))
+
+                    print(f"🔍 Paradex: best_bid={best_bid}, best_ask={best_ask}, last_price={last_price}")
+
                     if best_bid > 0 and best_ask > 0:
                         return (best_bid + best_ask) / 2
-                    return float(market_data.get('last_price', 0))
+                    return last_price
 
             print(f"⚠ Market {self.market} not found in Paradex")
+            if results:
+                available = [m.get('symbol') for m in results[:5]]
+                print(f"ℹ️  Available markets: {', '.join(available)}")
             return None
 
         except Exception as e:
             print(f"❌ Paradex price fetch error: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     async def place_market_order(self, side: str, size: float) -> Optional[Dict[str, Any]]:
