@@ -51,3 +51,4 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+lighter/
