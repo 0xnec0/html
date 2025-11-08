@@ -175,10 +175,10 @@ class ParadexClient:
         try:
             # Try SDK first
             if self.client:
-                summary = self.client.api_client.fetch_markets_summary()
+                summary = self.client.api_client.fetch_markets_summary({"market": self.market})
             else:
                 # Use REST API
-                summary = await self._make_request("GET", "/markets/summary")
+                summary = await self._make_request("GET", f"/markets/summary?market={self.market}")
 
             if not summary:
                 return None

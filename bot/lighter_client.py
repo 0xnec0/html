@@ -72,39 +72,23 @@ class LighterClient:
             Current market price or None if error
         """
         try:
-            if self.client:
-                # Using SDK - get orderbook
-                api_client = lighter.ApiClient()
-                try:
-                    orderbook_api = lighter.OrderBookApi(api_client)
-                    orderbook = await orderbook_api.get_order_book(market=self.market, depth=1)
+            # Use REST API for price (works without full SDK)
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                # Try public orderbook endpoint
+                url = f"{self.base_url}/orderbook/{self.market}"
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        bids = data.get('bids', [])
+                        asks = data.get('asks', [])
 
-                    if orderbook and hasattr(orderbook, 'bids') and hasattr(orderbook, 'asks'):
-                        if orderbook.bids and orderbook.asks:
-                            best_bid = float(orderbook.bids[0].price) if hasattr(orderbook.bids[0], 'price') else float(orderbook.bids[0][0])
-                            best_ask = float(orderbook.asks[0].price) if hasattr(orderbook.asks[0], 'price') else float(orderbook.asks[0][0])
+                        if bids and asks:
+                            best_bid = float(bids[0][0]) if isinstance(bids[0], list) else float(bids[0].get('price', 0))
+                            best_ask = float(asks[0][0]) if isinstance(asks[0], list) else float(asks[0].get('price', 0))
 
                             if best_bid > 0 and best_ask > 0:
                                 return (best_bid + best_ask) / 2
-                finally:
-                    await api_client.close()
-            else:
-                # Using REST API
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    url = f"{self.base_url}/orderbook/{self.market}"
-                    async with session.get(url) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            bids = data.get('bids', [])
-                            asks = data.get('asks', [])
-
-                            if bids and asks:
-                                best_bid = float(bids[0][0]) if isinstance(bids[0], list) else float(bids[0].get('price', 0))
-                                best_ask = float(asks[0][0]) if isinstance(asks[0], list) else float(asks[0].get('price', 0))
-
-                                if best_bid > 0 and best_ask > 0:
-                                    return (best_bid + best_ask) / 2
 
             print(f"⚠ Could not determine price from Lighter orderbook")
             return None
