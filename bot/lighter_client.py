@@ -220,6 +220,7 @@ class LighterClient:
                 base_amount=str(size),
                 price=str(limit_price),
                 is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
+                order_type="Limit",  # Order type: Limit, Market, etc.
                 client_order_index=client_order_index,
                 time_in_force="IOC",  # Immediate or Cancel
             )
