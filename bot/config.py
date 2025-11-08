@@ -107,16 +107,18 @@ class Config:
         """
         missing = []
 
-        # Check Paradex: L1 OR L2 credentials required
-        has_l1 = self.paradex_l1_address and self.paradex_l1_private_key
-        has_l2 = self.paradex_l2_address and self.paradex_l2_private_key
+        # Check Paradex credentials
+        # L1 full auth: L1 address + L1 private key
+        # L2 auth: L1 address + L2 private key (no L2 address needed)
+        has_l1_full = self.paradex_l1_address and self.paradex_l1_private_key
+        has_l2_auth = self.paradex_l1_address and self.paradex_l2_private_key
 
-        if not (has_l1 or has_l2):
-            missing.append('Paradex credentials (L1 Address+Key OR L2 Address+Key)')
-        elif has_l2 and not has_l1:
-            # L2-only mode - warn about SDK requirement
-            print("ℹ️  L2-only authentication detected")
-            print("   Note: Paradex SDK required for L2-only mode")
+        if not (has_l1_full or has_l2_auth):
+            missing.append('Paradex: PARADEX_L1_ADDRESS + (PARADEX_L1_PRIVATE_KEY or PARADEX_L2_PRIVATE_KEY)')
+        elif has_l2_auth and not self.paradex_l1_private_key:
+            # L2 auth mode - warn about SDK requirement
+            print("ℹ️  L2 authentication detected (L1 address + L2 private key)")
+            print("   Note: Paradex SDK required for L2 authentication")
             print("   Install with: pip install paradex-py")
 
         # Check Lighter credentials

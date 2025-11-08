@@ -62,14 +62,17 @@ class ParadexClient:
 
                 # Use L2 authentication if L2 private key provided
                 if l2_private_key:
-                    # L2 authentication: requires L1 address + L2 private key
+                    # L2 authentication: requires Ethereum L1 address + L2 private key
+                    if not l1_address:
+                        raise ValueError("L2 authentication requires PARADEX_L1_ADDRESS (Ethereum address)")
                     self.client = Paradex(
                         env=env_str,
-                        l1_address=l2_address or l1_address,  # Use L2 address if provided, fallback to L1
-                        l2_private_key=l2_private_key
+                        l1_address=l1_address,  # Ethereum L1 address (42 chars)
+                        l2_private_key=l2_private_key  # L2 private key
                     )
                     print(f"✓ Paradex initialized with L2 SDK")
-                    print(f"  L2 Address: {l2_address}")
+                    print(f"  L1 Address: {l1_address}")
+                    print(f"  Using L2 private key for authentication")
                 elif l1_address and l1_private_key:
                     # L1 authentication (for new accounts)
                     self.client = Paradex(
