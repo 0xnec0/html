@@ -235,12 +235,20 @@ class LighterClient:
                 finally:
                     await api_client.close()
             else:
-                print("❌ Lighter SDK required for account balance")
-                return None
+                # Use REST API - public endpoint for account info
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    url = f"{self.base_url}/api/v1/account/{self.account_index}"
+                    async with session.get(url) as response:
+                        if response.status == 200:
+                            return await response.json()
+                        else:
+                            print(f"ℹ️  Lighter account balance unavailable (SDK required for private data)")
+                            return {"status": "SDK_REQUIRED", "message": "Install Lighter SDK for full account access"}
 
         except Exception as e:
-            print(f"❌ Lighter balance error: {e}")
-            return None
+            print(f"ℹ️  Lighter balance info unavailable: {e}")
+            return {"status": "UNAVAILABLE"}
 
     async def cancel_order(self, order_id: str) -> bool:
         """

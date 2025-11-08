@@ -123,11 +123,12 @@ class Config:
             print("   Note: Paradex SDK required for L2 authentication")
             print("   Install with: pip install paradex-py")
 
-        # Check Lighter credentials
-        if not self.lighter_private_key:
-            missing.append('Lighter Private Key (LIGHTER_PRIVATE_KEY)')
+        # Check Lighter credentials (optional - can work without SDK)
+        # Lighter SDK is optional due to dependency conflicts
+        # The bot will use REST API mode if SDK is not available
         if not self.lighter_account_index:
-            missing.append('Lighter Account Index (LIGHTER_ACCOUNT_INDEX)')
+            print("ℹ️  Lighter account index not set - using default (0)")
+            print("   Note: Get your account index from Lighter API for SDK mode")
 
         if missing:
             print(f"❌ Missing required configuration: {', '.join(missing)}")
