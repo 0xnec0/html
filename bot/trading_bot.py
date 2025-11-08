@@ -28,7 +28,9 @@ class TradingBot:
             env=config.paradex_env,
             l1_address=config.paradex_l1_address,
             l1_private_key=config.paradex_l1_private_key,
-            market=config.paradex_market
+            market=config.paradex_market,
+            l2_address=config.paradex_l2_address,
+            l2_private_key=config.paradex_l2_private_key
         )
 
         self.lighter = LighterClient(

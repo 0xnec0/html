@@ -44,6 +44,16 @@ class Config:
         return os.getenv('PARADEX_L1_PRIVATE_KEY', self.config_data.get('paradex', {}).get('l1_private_key', ''))
 
     @property
+    def paradex_l2_address(self) -> str:
+        """Paradex L2 address (for existing accounts)"""
+        return os.getenv('PARADEX_L2_ADDRESS', self.config_data.get('paradex', {}).get('l2_address', ''))
+
+    @property
+    def paradex_l2_private_key(self) -> str:
+        """Paradex L2 private key (for existing accounts)"""
+        return os.getenv('PARADEX_L2_PRIVATE_KEY', self.config_data.get('paradex', {}).get('l2_private_key', ''))
+
+    @property
     def paradex_market(self) -> str:
         """Paradex market symbol"""
         return os.getenv('PARADEX_MARKET', self.config_data.get('paradex', {}).get('market', 'XMR-USD-PERP'))

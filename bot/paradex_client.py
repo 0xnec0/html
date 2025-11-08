@@ -15,7 +15,7 @@ from eth_account.messages import encode_defunct
 
 # Try to import SDK, but make it optional
 try:
-    from paradex_py import Paradex
+    from paradex_py import Paradex, ParadexSubkey
     from paradex_py.environment import Environment
     PARADEX_SDK_AVAILABLE = True
 except ImportError:
@@ -26,7 +26,8 @@ except ImportError:
 class ParadexClient:
     """Client for interacting with Paradex DEX"""
 
-    def __init__(self, env: str, l1_address: str, l1_private_key: str, market: str = "DOGE-USD-PERP"):
+    def __init__(self, env: str, l1_address: str, l1_private_key: str, market: str = "DOGE-USD-PERP",
+                 l2_address: str = None, l2_private_key: str = None):
         """
         Initialize Paradex client
 
@@ -35,10 +36,14 @@ class ParadexClient:
             l1_address: Ethereum L1 address
             l1_private_key: Ethereum L1 private key
             market: Trading market symbol
+            l2_address: Optional L2 address (for existing accounts)
+            l2_private_key: Optional L2 private key (for existing accounts)
         """
         self.market = market
         self.l1_address = l1_address
         self.l1_private_key = l1_private_key
+        self.l2_address = l2_address
+        self.l2_private_key = l2_private_key
         self.env_name = env.upper()
 
         # Set API base URL
@@ -56,13 +61,25 @@ class ParadexClient:
             try:
                 # Environment is a string: "testnet" or "prod"
                 env_str = "testnet" if self.env_name == "TESTNET" else "prod"
-                self.client = Paradex(
-                    env=env_str,
-                    l1_address=l1_address,
-                    l1_private_key=l1_private_key
-                )
-                print(f"✓ Paradex initialized with SDK")
-                print(f"  L2 Address: {hex(self.client.account.l2_address)}")
+
+                # Use L2-only authentication if L2 credentials provided
+                if l2_address and l2_private_key:
+                    self.client = ParadexSubkey(
+                        env=env_str,
+                        l2_address=l2_address,
+                        l2_private_key=l2_private_key
+                    )
+                    print(f"✓ Paradex initialized with L2 SDK (Subkey)")
+                    print(f"  L2 Address: {self.client.account.l2_address}")
+                else:
+                    # Use L1 authentication (for new accounts)
+                    self.client = Paradex(
+                        env=env_str,
+                        l1_address=l1_address,
+                        l1_private_key=l1_private_key
+                    )
+                    print(f"✓ Paradex initialized with L1 SDK")
+                    print(f"  L2 Address: {hex(self.client.account.l2_address)}")
             except Exception as e:
                 print(f"⚠ SDK init failed, using REST API: {e}")
                 self.client = None
