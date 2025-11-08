@@ -52,13 +52,10 @@ class ParadexClient:
         else:
             self.base_url = "https://api.prod.paradex.trade/v1"
 
-        # Initialize account (only if L1 private key provided)
-        self.account = None
-        if l1_private_key:
-            self.account = Account.from_key(l1_private_key)
-
         # Try SDK initialization if available
         self.client = None
+        self.account = None
+
         if PARADEX_SDK_AVAILABLE:
             try:
                 # Environment is a string: "testnet" or "prod"
@@ -83,9 +80,28 @@ class ParadexClient:
                     print(f"✓ Paradex initialized with L1 SDK")
                     print(f"  L2 Address: {hex(self.client.account.l2_address)}")
             except Exception as e:
-                print(f"⚠ SDK init failed, using REST API: {e}")
+                print(f"⚠ SDK init failed: {e}")
                 self.client = None
-        else:
+
+        # If SDK is not available or failed, try REST API with L1 credentials
+        if not self.client:
+            # L2-only authentication requires SDK
+            if l2_address and l2_private_key and not l1_private_key:
+                raise ValueError(
+                    "❌ L2-only authentication requires Paradex SDK!\n"
+                    "   Please install it: pip install paradex-py\n"
+                    "   Or provide L1 credentials for REST API mode."
+                )
+
+            # REST API requires L1 credentials
+            if not l1_private_key:
+                raise ValueError(
+                    "❌ REST API mode requires L1 private key!\n"
+                    "   Please install Paradex SDK for L2 authentication: pip install paradex-py\n"
+                    "   Or provide L1 credentials in your .env file."
+                )
+
+            self.account = Account.from_key(l1_private_key)
             print(f"✓ Paradex initialized with REST API")
             print(f"  Address: {self.l1_address}")
 

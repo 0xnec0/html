@@ -113,6 +113,11 @@ class Config:
 
         if not (has_l1 or has_l2):
             missing.append('Paradex credentials (L1 Address+Key OR L2 Address+Key)')
+        elif has_l2 and not has_l1:
+            # L2-only mode - warn about SDK requirement
+            print("ℹ️  L2-only authentication detected")
+            print("   Note: Paradex SDK required for L2-only mode")
+            print("   Install with: pip install paradex-py")
 
         # Check Lighter credentials
         if not self.lighter_api_key:
