@@ -80,32 +80,38 @@ class LighterClient:
             try:
                 # Get all markets using the API client
                 response = self.client.api_client.call_api(
-                    '/markets',
-                    'GET',
-                    response_types_map={'200': 'object'}
+                    method='GET',
+                    url='/markets'
                 )
 
-                # Parse response
-                if response and response.data:
-                    markets = response.data if isinstance(response.data, list) else [response.data]
+                # Parse response - response.data should contain the JSON
+                if response and hasattr(response, 'data'):
+                    import json
+                    # response.data might be a string, parse it
+                    if isinstance(response.data, str):
+                        markets = json.loads(response.data)
+                    else:
+                        markets = response.data
 
-                    # Find DOGE market
-                    for market in markets:
-                        if isinstance(market, dict):
-                            symbol = market.get('symbol', '')
-                        else:
-                            symbol = getattr(market, 'symbol', '')
-
-                        if symbol == self.market or symbol.upper() == self.market.upper():
-                            # Get price
+                    # Markets should be a list
+                    if isinstance(markets, list):
+                        # Find DOGE market
+                        for market in markets:
                             if isinstance(market, dict):
-                                last_price = float(market.get('last_price', 0) or 0)
-                                mark_price = float(market.get('mark_price', 0) or 0)
+                                symbol = market.get('symbol', '')
                             else:
-                                last_price = float(getattr(market, 'last_price', 0) or 0)
-                                mark_price = float(getattr(market, 'mark_price', 0) or 0)
+                                symbol = getattr(market, 'symbol', '')
 
-                            return last_price or mark_price or None
+                            if symbol == self.market or symbol.upper() == self.market.upper():
+                                # Get price
+                                if isinstance(market, dict):
+                                    last_price = float(market.get('last_price', 0) or 0)
+                                    mark_price = float(market.get('mark_price', 0) or 0)
+                                else:
+                                    last_price = float(getattr(market, 'last_price', 0) or 0)
+                                    mark_price = float(getattr(market, 'mark_price', 0) or 0)
+
+                                return last_price or mark_price or None
 
                 print(f"⚠ Market {self.market} not found in Lighter")
                 return None
