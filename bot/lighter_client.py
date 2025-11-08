@@ -76,39 +76,43 @@ class LighterClient:
                 print(f"⚠ Lighter SDK required for market data")
                 return None
 
-            # Use SDK to get market info
-            # Lighter SDK uses synchronous calls, not async
+            # Use ApiClient to call markets endpoint
             try:
-                # Get market info using SDK
-                markets_response = self.client.get_markets()
+                # Get all markets using the API client
+                response = self.client.api_client.call_api(
+                    '/markets',
+                    'GET',
+                    response_types_map={'200': 'object'}
+                )
 
-                # Find DOGE market
-                if markets_response and isinstance(markets_response, (list, tuple)):
-                    for market in markets_response:
-                        market_symbol = market.get('symbol', '') if isinstance(market, dict) else getattr(market, 'symbol', '')
-                        if market_symbol == self.market or market_symbol.startswith(self.market):
-                            # Get best bid/ask
+                # Parse response
+                if response and response.data:
+                    markets = response.data if isinstance(response.data, list) else [response.data]
+
+                    # Find DOGE market
+                    for market in markets:
+                        if isinstance(market, dict):
+                            symbol = market.get('symbol', '')
+                        else:
+                            symbol = getattr(market, 'symbol', '')
+
+                        if symbol == self.market or symbol.upper() == self.market.upper():
+                            # Get price
                             if isinstance(market, dict):
-                                best_bid = float(market.get('best_bid', 0) or 0)
-                                best_ask = float(market.get('best_ask', 0) or 0)
                                 last_price = float(market.get('last_price', 0) or 0)
+                                mark_price = float(market.get('mark_price', 0) or 0)
                             else:
-                                best_bid = float(getattr(market, 'best_bid', 0) or 0)
-                                best_ask = float(getattr(market, 'best_ask', 0) or 0)
                                 last_price = float(getattr(market, 'last_price', 0) or 0)
+                                mark_price = float(getattr(market, 'mark_price', 0) or 0)
 
-                            if best_bid > 0 and best_ask > 0:
-                                return (best_bid + best_ask) / 2
-                            elif last_price > 0:
-                                return last_price
+                            return last_price or mark_price or None
 
                 print(f"⚠ Market {self.market} not found in Lighter")
                 return None
 
-            except AttributeError as e:
-                # Method doesn't exist, try alternative
-                print(f"ℹ️  Lighter market data unavailable: {e}")
-                print(f"   Note: Using Lighter SDK for trading requires full setup")
+            except Exception as e:
+                # Fallback: just return None so trading can still work
+                print(f"ℹ️  Lighter price unavailable (using order-based pricing): {e}")
                 return None
 
         except Exception as e:
