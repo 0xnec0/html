@@ -60,19 +60,21 @@ class Config:
 
     # Lighter Configuration
     @property
-    def lighter_api_key(self) -> str:
-        """Lighter API key"""
-        return os.getenv('LIGHTER_API_KEY', self.config_data.get('lighter', {}).get('api_key', ''))
-
-    @property
-    def lighter_api_secret(self) -> str:
-        """Lighter API secret"""
-        return os.getenv('LIGHTER_API_SECRET', self.config_data.get('lighter', {}).get('api_secret', ''))
-
-    @property
     def lighter_private_key(self) -> str:
-        """Lighter private key for signing transactions"""
+        """Lighter API key private key for signing transactions"""
         return os.getenv('LIGHTER_PRIVATE_KEY', self.config_data.get('lighter', {}).get('private_key', ''))
+
+    @property
+    def lighter_account_index(self) -> int:
+        """Lighter account index"""
+        index = os.getenv('LIGHTER_ACCOUNT_INDEX', self.config_data.get('lighter', {}).get('account_index', '0'))
+        return int(index)
+
+    @property
+    def lighter_api_key_index(self) -> int:
+        """Lighter API key index (2-254)"""
+        index = os.getenv('LIGHTER_API_KEY_INDEX', self.config_data.get('lighter', {}).get('api_key_index', '2'))
+        return int(index)
 
     @property
     def lighter_market(self) -> str:
@@ -122,10 +124,10 @@ class Config:
             print("   Install with: pip install paradex-py")
 
         # Check Lighter credentials
-        if not self.lighter_api_key:
-            missing.append('Lighter API Key')
-        if not self.lighter_api_secret:
-            missing.append('Lighter API Secret')
+        if not self.lighter_private_key:
+            missing.append('Lighter Private Key (LIGHTER_PRIVATE_KEY)')
+        if not self.lighter_account_index:
+            missing.append('Lighter Account Index (LIGHTER_ACCOUNT_INDEX)')
 
         if missing:
             print(f"❌ Missing required configuration: {', '.join(missing)}")

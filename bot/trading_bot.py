@@ -34,9 +34,9 @@ class TradingBot:
         )
 
         self.lighter = LighterClient(
-            api_key=config.lighter_api_key,
-            api_secret=config.lighter_api_secret,
             private_key=config.lighter_private_key,
+            account_index=config.lighter_account_index,
+            api_key_index=config.lighter_api_key_index,
             market=config.lighter_market
         )
 

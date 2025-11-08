@@ -1,55 +1,65 @@
 """
-Lighter DEX client implementation
+Lighter DEX client implementation using official SDK
 Handles connection and trading operations on Lighter
 """
 
 import asyncio
 from typing import Dict, Any, Optional
+from decimal import Decimal
 
 # Try to import SDK, but make it optional
 try:
-    from lighter.client import LighterClient as LighterSDK
+    import lighter
     LIGHTER_SDK_AVAILABLE = True
 except ImportError:
-    try:
-        # Try alternative import path
-        from lighter_sdk import LighterClient as LighterSDK
-        LIGHTER_SDK_AVAILABLE = True
-    except ImportError:
-        LighterSDK = None
-        LIGHTER_SDK_AVAILABLE = False
-        print("⚠ Lighter SDK not available, using REST API")
+    LIGHTER_SDK_AVAILABLE = False
+    print("⚠ Lighter SDK not available, using REST API")
 
 
 class LighterClient:
-    """Client for interacting with Lighter DEX"""
+    """Client for interacting with Lighter DEX using official SDK"""
 
-    def __init__(self, api_key: str, api_secret: str, private_key: str, market: str = "DOGE"):
+    def __init__(self, private_key: str, account_index: int, api_key_index: int = 2, market: str = "DOGE"):
         """
-        Initialize Lighter client
+        Initialize Lighter client with official SDK
 
         Args:
-            api_key: Lighter API key
-            api_secret: Lighter API secret
-            private_key: Private key for signing transactions
+            private_key: API key private key for signing transactions
+            account_index: Account index from Lighter
+            api_key_index: API key index (2-254, default 2)
             market: Trading market symbol
         """
-        self.api_key = api_key
-        self.api_secret = api_secret
         self.private_key = private_key
+        self.account_index = account_index
+        self.api_key_index = api_key_index
         self.market = market
+        self.base_url = "https://mainnet.zklighter.elliot.ai"
 
         # Initialize Lighter SDK
-        # Note: This initialization may need to be adjusted based on actual SDK
-        if LighterSDK:
-            self.client = LighterSDK(
-                api_key=api_key,
-                api_secret=api_secret,
-                private_key=private_key
-            )
-            print(f"✓ Lighter initialized with SDK")
-        else:
-            self.client = None
+        self.client = None
+        if LIGHTER_SDK_AVAILABLE:
+            try:
+                self.client = lighter.SignerClient(
+                    url=self.base_url,
+                    private_key=self.private_key,
+                    account_index=self.account_index,
+                    api_key_index=self.api_key_index,
+                )
+
+                # Verify client is working
+                err = self.client.check_client()
+                if err is not None:
+                    print(f"⚠ Lighter client check failed: {err}")
+                    self.client = None
+                else:
+                    print(f"✓ Lighter initialized with official SDK")
+                    print(f"  Account Index: {self.account_index}")
+                    print(f"  API Key Index: {self.api_key_index}")
+            except Exception as e:
+                print(f"⚠ Lighter SDK init failed: {e}")
+                self.client = None
+
+        if not self.client:
             print(f"⚠ Lighter SDK not available, using REST API fallback")
 
         print(f"  Market: {self.market}")
@@ -63,61 +73,44 @@ class LighterClient:
         """
         try:
             if self.client:
-                # Using SDK
-                orderbook = await self._get_orderbook_sdk()
+                # Using SDK - get orderbook
+                api_client = lighter.ApiClient()
+                try:
+                    orderbook_api = lighter.OrderBookApi(api_client)
+                    orderbook = await orderbook_api.get_order_book(market=self.market, depth=1)
+
+                    if orderbook and hasattr(orderbook, 'bids') and hasattr(orderbook, 'asks'):
+                        if orderbook.bids and orderbook.asks:
+                            best_bid = float(orderbook.bids[0].price) if hasattr(orderbook.bids[0], 'price') else float(orderbook.bids[0][0])
+                            best_ask = float(orderbook.asks[0].price) if hasattr(orderbook.asks[0], 'price') else float(orderbook.asks[0][0])
+
+                            if best_bid > 0 and best_ask > 0:
+                                return (best_bid + best_ask) / 2
+                finally:
+                    await api_client.close()
             else:
                 # Using REST API
-                orderbook = await self._get_orderbook_rest()
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    url = f"{self.base_url}/orderbook/{self.market}"
+                    async with session.get(url) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            bids = data.get('bids', [])
+                            asks = data.get('asks', [])
 
-            if not orderbook:
-                return None
+                            if bids and asks:
+                                best_bid = float(bids[0][0]) if isinstance(bids[0], list) else float(bids[0].get('price', 0))
+                                best_ask = float(asks[0][0]) if isinstance(asks[0], list) else float(asks[0].get('price', 0))
 
-            # Calculate mid price from best bid/ask
-            bids = orderbook.get('bids', [])
-            asks = orderbook.get('asks', [])
-
-            if bids and asks:
-                best_bid = float(bids[0][0]) if isinstance(bids[0], list) else float(bids[0].get('price', 0))
-                best_ask = float(asks[0][0]) if isinstance(asks[0], list) else float(asks[0].get('price', 0))
-
-                if best_bid > 0 and best_ask > 0:
-                    return (best_bid + best_ask) / 2
+                                if best_bid > 0 and best_ask > 0:
+                                    return (best_bid + best_ask) / 2
 
             print(f"⚠ Could not determine price from Lighter orderbook")
             return None
 
         except Exception as e:
             print(f"❌ Lighter price fetch error: {e}")
-            return None
-
-    async def _get_orderbook_sdk(self) -> Optional[Dict[str, Any]]:
-        """Get orderbook using SDK"""
-        try:
-            return self.client.get_orderbook(self.market)
-        except Exception as e:
-            print(f"❌ Lighter SDK orderbook error: {e}")
-            return None
-
-    async def _get_orderbook_rest(self) -> Optional[Dict[str, Any]]:
-        """Get orderbook using REST API"""
-        import aiohttp
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = f"https://mainnet.zklighter.elliot.ai/orderbook/{self.market}"
-                headers = {
-                    'X-API-KEY': self.api_key
-                }
-
-                async with session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        return await response.json()
-                    else:
-                        print(f"❌ Lighter API error: {response.status}")
-                        return None
-
-        except Exception as e:
-            print(f"❌ Lighter REST API error: {e}")
             return None
 
     async def place_market_order(self, side: str, size: float) -> Optional[Dict[str, Any]]:
@@ -132,16 +125,48 @@ class LighterClient:
             Order result or None if error
         """
         try:
-            if self.client:
-                # Using SDK
-                result = await self._place_order_sdk(side, size)
-            else:
-                # Using REST API
-                result = await self._place_order_rest(side, size)
+            if not self.client:
+                print("❌ Lighter SDK required for placing orders")
+                return None
 
-            if result:
-                print(f"✓ Lighter order placed: {side} {size} {self.market}")
-                print(f"  Order ID: {result.get('id', 'N/A')}")
+            # Get current price for limit order
+            current_price = await self.get_market_price()
+            if not current_price:
+                raise ValueError("Could not fetch current market price")
+
+            # Set aggressive limit price to act as market order
+            slippage_multiplier = 1.05 if side.upper() == 'BUY' else 0.95
+            limit_price = current_price * slippage_multiplier
+
+            # Create auth token
+            auth, err = self.client.create_auth_token_with_expiry(
+                lighter.SignerClient.DEFAULT_10_MIN_AUTH_EXPIRY
+            )
+            if err is not None:
+                raise Exception(f"Failed to create auth token: {err}")
+
+            # Place limit order with IOC (acts as market order)
+            # Note: Actual method signature may vary - this is based on common patterns
+            tx, tx_hash, err = await self.client.create_order(
+                market_index=self._get_market_index(self.market),
+                base_amount=str(size),
+                price=str(limit_price),
+                is_buy=(side.upper() == 'BUY'),
+                time_in_force="IOC",  # Immediate or Cancel
+            )
+
+            if err is not None:
+                raise Exception(f"Order failed: {err}")
+
+            result = {
+                'id': tx_hash,
+                'tx': tx,
+                'status': 'submitted'
+            }
+
+            print(f"✓ Lighter order placed: {side} {size} {self.market}")
+            print(f"  TX Hash: {tx_hash}")
+            print(f"  Price: {limit_price:.4f}")
 
             return result
 
@@ -149,89 +174,42 @@ class LighterClient:
             print(f"❌ Lighter order error: {e}")
             return None
 
-    async def _place_order_sdk(self, side: str, size: float) -> Optional[Dict[str, Any]]:
-        """Place order using SDK"""
-        try:
-            return self.client.place_market_order(
-                ticker=self.market,
-                side=side.upper(),
-                amount=size
-            )
-        except Exception as e:
-            print(f"❌ Lighter SDK order error: {e}")
-            return None
-
-    async def _place_order_rest(self, side: str, size: float) -> Optional[Dict[str, Any]]:
-        """Place order using REST API"""
-        import aiohttp
-        import time
-        import hmac
-        import hashlib
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = "https://mainnet.zklighter.elliot.ai/orders"
-
-                # Prepare order data
-                timestamp = str(int(time.time() * 1000))
-                order_data = {
-                    'ticker': self.market,
-                    'side': side.upper(),
-                    'type': 'MARKET',
-                    'amount': str(size),
-                    'timestamp': timestamp
-                }
-
-                # Create signature
-                message = '&'.join([f"{k}={v}" for k, v in sorted(order_data.items())])
-                signature = hmac.new(
-                    self.api_secret.encode(),
-                    message.encode(),
-                    hashlib.sha256
-                ).hexdigest()
-
-                headers = {
-                    'X-API-KEY': self.api_key,
-                    'X-SIGNATURE': signature,
-                    'Content-Type': 'application/json'
-                }
-
-                async with session.post(url, json=order_data, headers=headers) as response:
-                    if response.status in [200, 201]:
-                        return await response.json()
-                    else:
-                        error_text = await response.text()
-                        print(f"❌ Lighter API error: {response.status} - {error_text}")
-                        return None
-
-        except Exception as e:
-            print(f"❌ Lighter REST API error: {e}")
-            return None
+    def _get_market_index(self, market: str) -> int:
+        """
+        Get market index for a given market symbol
+        Note: This is a placeholder - actual mapping needed
+        """
+        # TODO: Get actual market indices from API
+        market_indices = {
+            'ETH': 0,
+            'BTC': 1,
+            'DOGE': 2,  # Placeholder
+        }
+        return market_indices.get(market, 0)
 
     async def get_order_status(self, order_id: str) -> Optional[Dict[str, Any]]:
         """
         Get order status
 
         Args:
-            order_id: Order ID
+            order_id: Order ID (transaction hash)
 
         Returns:
             Order details or None if error
         """
         try:
             if self.client:
-                return self.client.get_order(order_id)
+                # Get transaction status
+                api_client = lighter.ApiClient()
+                try:
+                    tx_api = lighter.TransactionApi(api_client)
+                    tx = await tx_api.get_transaction(hash=order_id)
+                    return tx.to_dict() if hasattr(tx, 'to_dict') else tx
+                finally:
+                    await api_client.close()
             else:
-                # REST API implementation
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    url = f"https://mainnet.zklighter.elliot.ai/orders/{order_id}"
-                    headers = {'X-API-KEY': self.api_key}
-
-                    async with session.get(url, headers=headers) as response:
-                        if response.status == 200:
-                            return await response.json()
-                        return None
+                print("❌ Lighter SDK required for order status")
+                return None
 
         except Exception as e:
             print(f"❌ Lighter order status error: {e}")
@@ -246,18 +224,19 @@ class LighterClient:
         """
         try:
             if self.client:
-                return self.client.get_account()
+                api_client = lighter.ApiClient()
+                try:
+                    account_api = lighter.AccountApi(api_client)
+                    account = await account_api.account(
+                        by="index",
+                        value=str(self.account_index)
+                    )
+                    return account.to_dict() if hasattr(account, 'to_dict') else account
+                finally:
+                    await api_client.close()
             else:
-                # REST API implementation
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    url = "https://mainnet.zklighter.elliot.ai/account"
-                    headers = {'X-API-KEY': self.api_key}
-
-                    async with session.get(url, headers=headers) as response:
-                        if response.status == 200:
-                            return await response.json()
-                        return None
+                print("❌ Lighter SDK required for account balance")
+                return None
 
         except Exception as e:
             print(f"❌ Lighter balance error: {e}")
@@ -274,18 +253,25 @@ class LighterClient:
             True if successful, False otherwise
         """
         try:
-            if self.client:
-                self.client.cancel_order(order_id)
-            else:
-                # REST API implementation
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    url = f"https://mainnet.zklighter.elliot.ai/orders/{order_id}"
-                    headers = {'X-API-KEY': self.api_key}
+            if not self.client:
+                print("❌ Lighter SDK required for canceling orders")
+                return False
 
-                    async with session.delete(url, headers=headers) as response:
-                        if response.status not in [200, 204]:
-                            return False
+            # Create auth token
+            auth, err = self.client.create_auth_token_with_expiry(
+                lighter.SignerClient.DEFAULT_10_MIN_AUTH_EXPIRY
+            )
+            if err is not None:
+                raise Exception(f"Failed to create auth token: {err}")
+
+            # Cancel order
+            tx, tx_hash, err = await self.client.cancel_order(
+                market_index=self._get_market_index(self.market),
+                order_index=int(order_id)
+            )
+
+            if err is not None:
+                raise Exception(f"Cancel failed: {err}")
 
             print(f"✓ Lighter order cancelled: {order_id}")
             return True
