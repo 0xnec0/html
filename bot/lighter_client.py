@@ -176,31 +176,35 @@ class LighterClient:
 
                             # Extract price from orderBookDetails response
                             if isinstance(data, dict):
-                                # Try different possible price fields
-                                last_price = float(data.get('last_price', 0) or 0)
-                                mark_price = float(data.get('mark_price', 0) or 0)
-                                oracle_price = float(data.get('oracle_price', 0) or 0)
-                                mid_price = float(data.get('mid_price', 0) or 0)
+                                # Check for order_book_details array
+                                if 'order_book_details' in data:
+                                    order_books = data['order_book_details']
+                                    print(f"🔍 Found {len(order_books)} markets in order_book_details")
 
-                                # Check if data is nested
-                                if 'data' in data:
-                                    data_inner = data['data']
-                                    print(f"🔍 Found 'data' field: {type(data_inner)}")
-                                    if isinstance(data_inner, dict):
-                                        last_price = last_price or float(data_inner.get('last_price', 0) or 0)
-                                        mark_price = mark_price or float(data_inner.get('mark_price', 0) or 0)
-                                        oracle_price = oracle_price or float(data_inner.get('oracle_price', 0) or 0)
-                                        mid_price = mid_price or float(data_inner.get('mid_price', 0) or 0)
+                                    # Find DOGE market
+                                    available_symbols = []
+                                    for book in order_books:
+                                        symbol = book.get('symbol', '')
+                                        available_symbols.append(symbol)
 
-                                print(f"🔍 Lighter prices: last={last_price}, mark={mark_price}, oracle={oracle_price}, mid={mid_price}")
+                                        if len(available_symbols) <= 3:
+                                            print(f"🔍 Market: {symbol}, last_trade_price: {book.get('last_trade_price')}")
 
-                                price = last_price or mark_price or oracle_price or mid_price
-                                if price > 0:
-                                    print(f"✅ Lighter price: ${price:.6f}")
-                                    return price
+                                        if symbol.upper() == self.market.upper():
+                                            # Found DOGE market!
+                                            last_trade_price = float(book.get('last_trade_price', 0) or 0)
+                                            print(f"✅ Lighter price: ${last_trade_price:.6f}")
+                                            return last_trade_price
+
+                                    # DOGE not found
+                                    print(f"⚠ Market {self.market} not found in Lighter")
+                                    print(f"ℹ️  Available markets: {', '.join(available_symbols[:10])}")
+                                    if len(available_symbols) > 10:
+                                        print(f"   ...and {len(available_symbols) - 10} more")
+                                    return None
                                 else:
-                                    print(f"⚠ All price fields are 0 or missing")
-                                    print(f"🔍 Full response: {data}")
+                                    print(f"⚠ No 'order_book_details' field in response")
+                                    print(f"🔍 Available keys: {list(data.keys())}")
                                     return None
                             else:
                                 print(f"⚠ Response is not a dict")
