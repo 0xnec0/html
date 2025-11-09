@@ -227,8 +227,8 @@ class ParadexClient:
                 raise ValueError("Could not fetch current market price")
 
             # Set aggressive limit price to ensure fill
-            # Use 3% slippage tolerance for IOC orders
-            slippage_multiplier = 1.03 if side.upper() == 'BUY' else 0.97
+            # Use 0.5% slippage tolerance for IOC orders to avoid EXCEEDS_MAX_SLIPPAGE
+            slippage_multiplier = 1.005 if side.upper() == 'BUY' else 0.995
             limit_price = current_price * slippage_multiplier
 
             # Round to 0.0001 (tick size for Paradex)
