@@ -139,6 +139,37 @@ class Config:
         timeout = os.getenv('EXECUTION_TIMEOUT', self.config_data.get('trading', {}).get('execution_timeout', '30'))
         return int(timeout)
 
+    # Delta Neutral Strategy Configuration
+    @property
+    def delta_neutral_usd_amount(self) -> float:
+        """Fixed USD amount per position for delta neutral strategy"""
+        amount = os.getenv('DELTA_NEUTRAL_USD_AMOUNT', self.config_data.get('delta_neutral', {}).get('usd_amount', '0'))
+        return float(amount) if amount else None
+
+    @property
+    def delta_neutral_leverage(self) -> int:
+        """Leverage multiplier for delta neutral strategy"""
+        leverage = os.getenv('DELTA_NEUTRAL_LEVERAGE', self.config_data.get('delta_neutral', {}).get('leverage', '10'))
+        return int(leverage)
+
+    @property
+    def delta_neutral_capital_pct(self) -> float:
+        """Percentage of capital to use for delta neutral strategy"""
+        pct = os.getenv('DELTA_NEUTRAL_CAPITAL_PCT', self.config_data.get('delta_neutral', {}).get('capital_pct', '0.5'))
+        return float(pct)
+
+    @property
+    def delta_neutral_min_hours(self) -> float:
+        """Minimum hold time in hours for delta neutral strategy"""
+        hours = os.getenv('DELTA_NEUTRAL_MIN_HOURS', self.config_data.get('delta_neutral', {}).get('min_hours', '2.0'))
+        return float(hours)
+
+    @property
+    def delta_neutral_max_hours(self) -> float:
+        """Maximum hold time in hours for delta neutral strategy"""
+        hours = os.getenv('DELTA_NEUTRAL_MAX_HOURS', self.config_data.get('delta_neutral', {}).get('max_hours', '3.0'))
+        return float(hours)
+
     def validate(self) -> bool:
         """
         Validate required configuration

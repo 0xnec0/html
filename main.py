@@ -144,14 +144,21 @@ async def main():
             )
 
         elif args.command == 'delta-neutral':
+            # Use command-line args if provided, otherwise use config
+            usd_amount = args.usd_amount if args.usd_amount is not None else config.delta_neutral_usd_amount
+            leverage = args.leverage if args.leverage != 10 else config.delta_neutral_leverage
+            capital_pct = args.capital_pct if args.capital_pct != 0.5 else config.delta_neutral_capital_pct
+            min_hours = args.min_hours if args.min_hours != 2.0 else config.delta_neutral_min_hours
+            max_hours = args.max_hours if args.max_hours != 3.0 else config.delta_neutral_max_hours
+
             strategy = DeltaNeutralStrategy(
                 bot=bot,
-                leverage=args.leverage,
-                capital_percentage=args.capital_pct,
-                usd_amount=args.usd_amount
+                leverage=leverage,
+                capital_percentage=capital_pct,
+                usd_amount=usd_amount
             )
             await strategy.run_loop(
-                hold_time_hours=(args.min_hours, args.max_hours),
+                hold_time_hours=(min_hours, max_hours),
                 max_cycles=args.max_cycles
             )
 
