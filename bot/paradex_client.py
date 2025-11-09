@@ -241,12 +241,15 @@ class ParadexClient:
 
             # Try SDK first
             if self.client and PARADEX_SDK_AVAILABLE:
+                # Ensure size is an integer (Paradex requires whole units)
+                size_int = int(size)
+
                 # Use SDK Order object
                 order = Order(
                     market=self.market,
                     order_type=OrderType.Limit,
                     order_side=OrderSide.Buy if side.upper() == 'BUY' else OrderSide.Sell,
-                    size=Decimal(str(size)),
+                    size=Decimal(str(size_int)),
                     limit_price=Decimal(str(limit_price)),
                     instruction="IOC"  # Immediate or Cancel
                 )
@@ -257,12 +260,15 @@ class ParadexClient:
                     # If max_slippage not supported, submit without it
                     result = self.client.api_client.submit_order(order=order)
             else:
+                # Ensure size is an integer (Paradex requires whole units)
+                size_int = int(size)
+
                 # Use REST API
                 order_params = {
                     'market': self.market,
                     'side': side.upper(),
                     'type': 'LIMIT',
-                    'size': str(size),
+                    'size': str(size_int),
                     'limit_price': str(limit_price),
                     'time_in_force': 'IOC',  # Immediate or Cancel
                     'max_slippage': 'auto'  # Auto slippage tolerance
@@ -270,7 +276,9 @@ class ParadexClient:
                 result = await self._make_request("POST", "/orders", order_params, signed=True)
 
             if result:
-                print(f"✓ Paradex order placed: {side} {size} {self.market}")
+                # Use the integer size for display
+                display_size = int(size)
+                print(f"✓ Paradex order placed: {side} {display_size} {self.market}")
                 print(f"  Order ID: {result.get('id', 'N/A')}")
                 print(f"  Price: {limit_price:.2f}")
 
