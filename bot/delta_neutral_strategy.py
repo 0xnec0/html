@@ -132,9 +132,11 @@ class DeltaNeutralStrategy:
         if self.usd_amount:
             # Use fixed USD amount
             position_size = self.usd_amount / avg_price
+            # Round down to integer (Paradex requires whole units)
+            position_size = int(position_size)
             print(f"\n💵 Using fixed USD amount: ${self.usd_amount:.2f}")
             print(f"   Price: ${avg_price:.4f}")
-            print(f"   Position size: {position_size:.2f} units")
+            print(f"   Position size: {position_size} units (rounded down)")
         else:
             # Get balances
             balances = await self.get_available_balance()
@@ -149,6 +151,8 @@ class DeltaNeutralStrategy:
                 position_size = 1.0
             else:
                 position_size = await self.calculate_position_size(avg_price, available_balance)
+                # Round down to integer
+                position_size = int(position_size)
 
         print(f"\n📊 Executing delta neutral strategy...")
         print(f"   Paradex: BUY {position_size} @ ${paradex_price:.4f}")
