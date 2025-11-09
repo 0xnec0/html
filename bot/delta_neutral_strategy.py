@@ -227,6 +227,16 @@ class DeltaNeutralStrategy:
         print(f"   Leverage: {self.leverage}x")
         print(f"   Capital: {self.capital_percentage*100}%")
 
+        # Get and display current balances
+        print("\n💰 Checking current balances...")
+        balances = await self.get_available_balance()
+        paradex_balance = balances.get('paradex', 0)
+        lighter_balance = balances.get('lighter', 0)
+
+        print(f"   Paradex: ${paradex_balance:.2f}")
+        print(f"   Lighter:  ${lighter_balance:.2f}")
+        print(f"   Total:    ${paradex_balance + lighter_balance:.2f}")
+
         # Get spread monitoring configuration
         max_spread_pct = self.bot.config.spread_max_pct
         check_interval = self.bot.config.spread_check_interval
@@ -316,8 +326,13 @@ class DeltaNeutralStrategy:
 
             print("\n✅ Delta neutral position opened successfully!")
 
-            # Send Discord notification
-            await self.notifier.send_position_opened(self.current_position)
+            # Send Discord notification with balance info
+            notification_data = {
+                **self.current_position,
+                'paradex_balance': paradex_balance,
+                'lighter_balance': lighter_balance
+            }
+            await self.notifier.send_position_opened(notification_data)
 
         # Handle partial failure - close the successful position
         elif paradex_success and not lighter_success:
@@ -412,6 +427,16 @@ class DeltaNeutralStrategy:
 
         position_size = self.current_position['size']
 
+        # Get and display current balances before closing
+        print("\n💰 Checking current balances...")
+        balances = await self.get_available_balance()
+        paradex_balance = balances.get('paradex', 0)
+        lighter_balance = balances.get('lighter', 0)
+
+        print(f"   Paradex: ${paradex_balance:.2f}")
+        print(f"   Lighter:  ${lighter_balance:.2f}")
+        print(f"   Total:    ${paradex_balance + lighter_balance:.2f}")
+
         # Get spread monitoring configuration
         max_spread_pct = self.bot.config.spread_max_pct
         check_interval = self.bot.config.spread_check_interval
@@ -494,8 +519,13 @@ class DeltaNeutralStrategy:
             }
             self._save_to_history(trade_data)
 
-            # Send Discord notification
-            await self.notifier.send_position_closed(trade_data)
+            # Send Discord notification with balance info
+            notification_data = {
+                **trade_data,
+                'paradex_balance': paradex_balance,
+                'lighter_balance': lighter_balance
+            }
+            await self.notifier.send_position_closed(notification_data)
 
             self.position_open = False
             self.current_position = None

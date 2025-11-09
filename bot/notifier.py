@@ -79,6 +79,8 @@ class DiscordNotifier:
         size = position_data.get('size', 0)
         paradex_price = position_data.get('paradex_price', 0)
         lighter_price = position_data.get('lighter_price', 0)
+        paradex_balance = position_data.get('paradex_balance', 0)
+        lighter_balance = position_data.get('lighter_balance', 0)
 
         message = f"""
 **🎯 Delta Neutral Position Opened**
@@ -87,6 +89,11 @@ class DiscordNotifier:
 **Paradex (LONG):** ${paradex_price:.4f}
 **Lighter (SHORT):** ${lighter_price:.4f}
 **Avg Price:** ${(paradex_price + lighter_price) / 2:.4f}
+
+**💰 Current Balances:**
+**Paradex:** ${paradex_balance:.2f}
+**Lighter:** ${lighter_balance:.2f}
+**Total:** ${paradex_balance + lighter_balance:.2f}
 
 Position opened successfully! ✅
         """
@@ -113,6 +120,8 @@ Position opened successfully! ✅
         total_pnl = trade_data.get('total_pnl', 0)
         entry_time = trade_data.get('entry_time', 'Unknown')
         exit_time = trade_data.get('exit_time', 'Unknown')
+        paradex_balance = trade_data.get('paradex_balance', 0)
+        lighter_balance = trade_data.get('lighter_balance', 0)
 
         # Determine color based on PnL
         if total_pnl > 0:
@@ -132,6 +141,11 @@ Position opened successfully! ✅
 **Paradex P&L:** ${paradex_pnl:.2f}
 **Lighter P&L:** ${lighter_pnl:.2f}
 **Total P&L:** ${total_pnl:.2f}
+
+**💰 Current Balances:**
+**Paradex:** ${paradex_balance:.2f}
+**Lighter:** ${lighter_balance:.2f}
+**Total:** ${paradex_balance + lighter_balance:.2f}
 
 **Entry:** {entry_time}
 **Exit:** {exit_time}
