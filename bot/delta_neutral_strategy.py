@@ -41,6 +41,10 @@ class DeltaNeutralStrategy:
         paradex_balance_info = await self.bot.paradex.get_account_balance()
         lighter_balance_info = await self.bot.lighter.get_account_balance()
 
+        # Debug: show raw responses
+        print(f"   DEBUG - Paradex response: {paradex_balance_info}")
+        print(f"   DEBUG - Lighter response: {lighter_balance_info}")
+
         # Extract USDC balance (assuming USDC as collateral)
         paradex_balance = 0.0
         lighter_balance = 0.0
@@ -52,14 +56,17 @@ class DeltaNeutralStrategy:
                 # Try different possible keys
                 paradex_balance = float(paradex_balance_info.get('available_balance', 0) or
                                       paradex_balance_info.get('equity', 0) or
-                                      paradex_balance_info.get('balance', 0))
+                                      paradex_balance_info.get('balance', 0) or
+                                      paradex_balance_info.get('available_withdrawal_balance', 0) or
+                                      paradex_balance_info.get('cross_balance', 0) or 0)
 
         if lighter_balance_info:
             # Extract balance from Lighter response
             if isinstance(lighter_balance_info, dict):
                 lighter_balance = float(lighter_balance_info.get('available_balance', 0) or
                                       lighter_balance_info.get('equity', 0) or
-                                      lighter_balance_info.get('balance', 0))
+                                      lighter_balance_info.get('balance', 0) or
+                                      lighter_balance_info.get('free_collateral', 0) or 0)
 
         balances = {
             'paradex': paradex_balance,
