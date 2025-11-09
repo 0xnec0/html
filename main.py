@@ -66,7 +66,7 @@ async def main():
     delta_parser.add_argument('--usd-amount', type=float, help='Fixed USD amount per position (e.g., 50 for $50)')
     delta_parser.add_argument('--min-hours', type=float, default=2.0, help='Minimum hold time in hours (default: 2.0)')
     delta_parser.add_argument('--max-hours', type=float, default=3.0, help='Maximum hold time in hours (default: 3.0)')
-    delta_parser.add_argument('--loop', action='store_true', help='Run continuously in loop mode (default: run once)')
+    delta_parser.add_argument('--once', action='store_true', help='Run only once (default: loop continuously)')
     delta_parser.add_argument('--max-cycles', type=int, help='Maximum cycles in loop mode (default: unlimited)')
 
     # Close All command
@@ -165,13 +165,7 @@ async def main():
                 usd_amount=usd_amount
             )
 
-            if args.loop:
-                # Run in loop mode
-                await strategy.run_loop(
-                    hold_time_hours=(min_hours, max_hours),
-                    max_cycles=args.max_cycles
-                )
-            else:
+            if args.once:
                 # Run once: open -> wait -> close
                 import random
                 from datetime import datetime, timedelta
@@ -208,6 +202,12 @@ async def main():
                         print("🔄 Closing open position...")
                         await strategy.close_delta_neutral_position()
                     raise KeyboardInterrupt
+            else:
+                # Run in loop mode (default)
+                await strategy.run_loop(
+                    hold_time_hours=(min_hours, max_hours),
+                    max_cycles=args.max_cycles
+                )
 
         elif args.command == 'close-all':
             # Try to auto-detect position size if not specified

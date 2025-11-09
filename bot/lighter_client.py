@@ -71,6 +71,16 @@ class LighterClient:
         self._market_id_cache = {}
         self._market_info_cache = {}  # Store full market details including decimals
 
+        # HTTP session for REST API calls (will be created on first use)
+        self._session = None
+
+    async def _get_session(self):
+        """Get or create aiohttp session"""
+        if self._session is None or self._session.closed:
+            import aiohttp
+            self._session = aiohttp.ClientSession()
+        return self._session
+
     async def _get_market_id_from_api(self, symbol: str) -> Optional[int]:
         """
         Get market_id from Lighter API for given symbol
@@ -86,28 +96,27 @@ class LighterClient:
             return self._market_id_cache[symbol]
 
         try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.base_url}/api/v1/orderBookDetails?market={symbol}"
-                async with session.get(url, proxy=self.proxy_url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if isinstance(data, dict) and 'order_book_details' in data:
-                            for book in data['order_book_details']:
-                                if book.get('symbol', '').upper() == symbol.upper():
-                                    market_id = book.get('market_id')
-                                    if market_id is not None:
-                                        # Cache market_id and full details
-                                        self._market_id_cache[symbol] = market_id
-                                        self._market_info_cache[symbol] = book
+            session = await self._get_session()
+            url = f"{self.base_url}/api/v1/orderBookDetails?market={symbol}"
+            async with session.get(url, proxy=self.proxy_url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if isinstance(data, dict) and 'order_book_details' in data:
+                        for book in data['order_book_details']:
+                            if book.get('symbol', '').upper() == symbol.upper():
+                                market_id = book.get('market_id')
+                                if market_id is not None:
+                                    # Cache market_id and full details
+                                    self._market_id_cache[symbol] = market_id
+                                    self._market_info_cache[symbol] = book
 
-                                        # Show decimal info
-                                        price_decimals = book.get('price_decimals', 0)
-                                        size_decimals = book.get('size_decimals', 0)
-                                        print(f"ℹ️  Found market_id for {symbol}: {market_id}")
-                                        print(f"   Price decimals: {price_decimals}, Size decimals: {size_decimals}")
+                                    # Show decimal info
+                                    price_decimals = book.get('price_decimals', 0)
+                                    size_decimals = book.get('size_decimals', 0)
+                                    print(f"ℹ️  Found market_id for {symbol}: {market_id}")
+                                    print(f"   Price decimals: {price_decimals}, Size decimals: {size_decimals}")
 
-                                        return market_id
+                                    return market_id
         except Exception as e:
             print(f"⚠ Failed to fetch market_id for {symbol}: {e}")
 
@@ -153,30 +162,29 @@ class LighterClient:
                     pass
 
             # REST API fallback
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
+            session = await self._get_session()
+            url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
 
-                try:
-                    async with session.get(url, proxy=self.proxy_url) as response:
-                        if response.status == 200:
-                            data = await response.json()
+            try:
+                async with session.get(url, proxy=self.proxy_url) as response:
+                    if response.status == 200:
+                        data = await response.json()
 
-                            # Extract price from orderBookDetails response
-                            if isinstance(data, dict) and 'order_book_details' in data:
-                                # Find DOGE market in order_book_details array
-                                for book in data['order_book_details']:
-                                    if book.get('symbol', '').upper() == self.market.upper():
-                                        return float(book.get('last_trade_price', 0) or 0) or None
+                        # Extract price from orderBookDetails response
+                        if isinstance(data, dict) and 'order_book_details' in data:
+                            # Find DOGE market in order_book_details array
+                            for book in data['order_book_details']:
+                                if book.get('symbol', '').upper() == self.market.upper():
+                                    return float(book.get('last_trade_price', 0) or 0) or None
 
-                            return None
-                        else:
-                            print(f"❌ Lighter API error: Status {response.status}")
-                            return None
+                        return None
+                    else:
+                        print(f"❌ Lighter API error: Status {response.status}")
+                        return None
 
-                except Exception as e:
-                    print(f"❌ Lighter error: {e}")
-                    return None
+            except Exception as e:
+                print(f"❌ Lighter error: {e}")
+                return None
 
         except Exception as e:
             print(f"❌ Lighter price fetch error: {e}")
@@ -191,60 +199,60 @@ class LighterClient:
         """
         try:
             import aiohttp
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
+            session = await self._get_session()
+            url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
 
-                try:
-                    async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                        if response.status == 200:
-                            data = await response.json()
+            try:
+                async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        data = await response.json()
 
-                            # Extract bid/ask from orderBookDetails response
-                            if isinstance(data, dict) and 'order_book_details' in data:
-                                for book in data['order_book_details']:
-                                    symbol = book.get('symbol', '')
+                        # Extract bid/ask from orderBookDetails response
+                        if isinstance(data, dict) and 'order_book_details' in data:
+                            for book in data['order_book_details']:
+                                symbol = book.get('symbol', '')
 
-                                    if symbol.upper() == self.market.upper():
-                                        # Get best bid (highest buy price) and best ask (lowest sell price)
-                                        asks = book.get('asks', [])
-                                        bids = book.get('bids', [])
+                                if symbol.upper() == self.market.upper():
+                                    # Get best bid (highest buy price) and best ask (lowest sell price)
+                                    asks = book.get('asks', [])
+                                    bids = book.get('bids', [])
 
-                                        if asks and bids and len(asks) > 0 and len(bids) > 0:
-                                            # asks[0] = [price, size]
-                                            # bids[0] = [price, size]
-                                            best_ask = float(asks[0][0])
-                                            best_bid = float(bids[0][0])
+                                    if asks and bids and len(asks) > 0 and len(bids) > 0:
+                                        # asks[0] = [price, size]
+                                        # bids[0] = [price, size]
+                                        best_ask = float(asks[0][0])
+                                        best_bid = float(bids[0][0])
 
-                                            if best_bid > 0 and best_ask > 0:
-                                                return (best_bid, best_ask)
+                                        if best_bid > 0 and best_ask > 0:
+                                            return (best_bid, best_ask)
+                                    else:
+                                        # Orderbook is empty, use last_trade_price as fallback
+                                        last_price = book.get('last_trade_price', 0)
+                                        if last_price and float(last_price) > 0:
+                                            last_price = float(last_price)
+                                            # Estimate bid/ask with small spread (0.01%)
+                                            spread = last_price * 0.0001
+                                            estimated_bid = last_price - spread / 2
+                                            estimated_ask = last_price + spread / 2
+                                            print(f"⚠️  {symbol}: オーダーブック空 - 最終取引価格を使用 (${last_price:.4f})")
+                                            return (estimated_bid, estimated_ask)
                                         else:
-                                            # Orderbook is empty, use last_trade_price as fallback
-                                            last_price = book.get('last_trade_price', 0)
-                                            if last_price and float(last_price) > 0:
-                                                last_price = float(last_price)
-                                                # Estimate bid/ask with small spread (0.01%)
-                                                spread = last_price * 0.0001
-                                                estimated_bid = last_price - spread / 2
-                                                estimated_ask = last_price + spread / 2
-                                                print(f"⚠️  {symbol}: オーダーブック空 - 最終取引価格を使用 (${last_price:.4f})")
-                                                return (estimated_bid, estimated_ask)
-                                            else:
-                                                print(f"❌ {symbol}: オーダーブックと最終取引価格がありません")
+                                            print(f"❌ {symbol}: オーダーブックと最終取引価格がありません")
 
-                                print(f"❌ Market '{self.market}' not found!")
-                            else:
-                                print(f"❌ Invalid response structure")
-                            return None
+                            print(f"❌ Market '{self.market}' not found!")
                         else:
-                            print(f"❌ HTTP {response.status}")
-                            return None
+                            print(f"❌ Invalid response structure")
+                        return None
+                    else:
+                        print(f"❌ HTTP {response.status}")
+                        return None
 
-                except asyncio.TimeoutError:
-                    print(f"❌ Timeout")
-                    return None
-                except aiohttp.ClientError as e:
-                    print(f"❌ ClientError: {e}")
-                    return None
+            except asyncio.TimeoutError:
+                print(f"❌ Timeout")
+                return None
+            except aiohttp.ClientError as e:
+                print(f"❌ ClientError: {e}")
+                return None
 
         except Exception:
             return None
@@ -405,15 +413,14 @@ class LighterClient:
                     await api_client.close()
             else:
                 # Use REST API - public endpoint for account info
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    url = f"{self.base_url}/api/v1/account/{self.account_index}"
-                    async with session.get(url) as response:
-                        if response.status == 200:
-                            return await response.json()
-                        else:
-                            print(f"ℹ️  Lighter account balance unavailable (SDK required for private data)")
-                            return {"status": "SDK_REQUIRED", "message": "Install Lighter SDK for full account access"}
+                session = await self._get_session()
+                url = f"{self.base_url}/api/v1/account/{self.account_index}"
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        print(f"ℹ️  Lighter account balance unavailable (SDK required for private data)")
+                        return {"status": "SDK_REQUIRED", "message": "Install Lighter SDK for full account access"}
 
         except Exception as e:
             print(f"ℹ️  Lighter balance info unavailable: {e}")
@@ -459,5 +466,7 @@ class LighterClient:
 
     async def close(self):
         """Close client session"""
+        # Close aiohttp session if it exists
+        if self._session and not self._session.closed:
+            await self._session.close()
         # Lighter SDK doesn't require explicit cleanup
-        pass

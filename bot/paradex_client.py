@@ -117,6 +117,15 @@ class ParadexClient:
 
         print(f"  Market: {self.market}")
 
+        # HTTP session for REST API calls (will be created on first use)
+        self._session = None
+
+    async def _get_session(self):
+        """Get or create aiohttp session"""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
     async def _make_request(self, method: str, endpoint: str, data: Dict = None, signed: bool = False) -> Optional[Dict[str, Any]]:
         """
         Make HTTP request to Paradex API
@@ -147,23 +156,23 @@ class ParadexClient:
             headers["X-API-Signature"] = signature.signature.hex()
 
         try:
-            async with aiohttp.ClientSession() as session:
-                if method == "GET":
-                    async with session.get(url, headers=headers, proxy=self.proxy_url) as response:
-                        if response.status == 200:
-                            return await response.json()
-                        else:
-                            error_text = await response.text()
-                            print(f"❌ Paradex API error: {response.status} - {error_text}")
-                            return None
-                elif method == "POST":
-                    async with session.post(url, json=data, headers=headers, proxy=self.proxy_url) as response:
-                        if response.status in [200, 201]:
-                            return await response.json()
-                        else:
-                            error_text = await response.text()
-                            print(f"❌ Paradex API error: {response.status} - {error_text}")
-                            return None
+            session = await self._get_session()
+            if method == "GET":
+                async with session.get(url, headers=headers, proxy=self.proxy_url) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        error_text = await response.text()
+                        print(f"❌ Paradex API error: {response.status} - {error_text}")
+                        return None
+            elif method == "POST":
+                async with session.post(url, json=data, headers=headers, proxy=self.proxy_url) as response:
+                    if response.status in [200, 201]:
+                        return await response.json()
+                    else:
+                        error_text = await response.text()
+                        print(f"❌ Paradex API error: {response.status} - {error_text}")
+                        return None
         except Exception as e:
             print(f"❌ Paradex request error: {e}")
             return None
@@ -406,6 +415,7 @@ class ParadexClient:
 
     async def close(self):
         """Close client session"""
-        # Paradex SDK and REST API don't require explicit cleanup
-        # aiohttp sessions are created with context managers
-        pass
+        # Close aiohttp session if it exists
+        if self._session and not self._session.closed:
+            await self._session.close()
+        # Paradex SDK doesn't require explicit cleanup
