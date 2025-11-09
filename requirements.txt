@@ -1,0 +1,19 @@
+# DOGE Trading Bot Requirements
+
+# Core dependencies
+python-dotenv>=1.0.0
+aiohttp>=3.9.0
+websockets>=12.0
+
+# Cryptography and signing
+eth-account>=0.11.0
+web3>=6.0.0
+
+# Optional: Install only one SDK at a time due to eth-account version conflicts
+# For Paradex:
+#   pip install paradex_py>=0.1.0
+# For Lighter:
+#   pip install lighter-sdk>=0.1.0
+#
+# Note: Both SDKs have conflicting eth-account version requirements.
+# The bot will work with REST API fallback if SDKs are not installed.
