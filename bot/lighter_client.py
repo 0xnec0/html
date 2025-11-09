@@ -201,8 +201,15 @@ class LighterClient:
 
                             # Extract bid/ask from orderBookDetails response
                             if isinstance(data, dict) and 'order_book_details' in data:
+                                # デバッグ: 利用可能なマーケットをリスト表示
+                                available_markets = [book.get('symbol', 'UNKNOWN') for book in data['order_book_details']]
+                                print(f"[DEBUG-Lighter] 利用可能なマーケット: {', '.join(available_markets)}")
+                                print(f"[DEBUG-Lighter] 探しているマーケット: {self.market}")
+
                                 for book in data['order_book_details']:
-                                    if book.get('symbol', '').upper() == self.market.upper():
+                                    symbol = book.get('symbol', '')
+
+                                    if symbol.upper() == self.market.upper():
                                         # Get best bid (highest buy price) and best ask (lowest sell price)
                                         asks = book.get('asks', [])
                                         bids = book.get('bids', [])
@@ -216,9 +223,9 @@ class LighterClient:
                                             if best_bid > 0 and best_ask > 0:
                                                 return (best_bid, best_ask)
                                         else:
-                                            print(f"[DEBUG-Lighter] Empty orderbook: asks={len(asks) if asks else 0}, bids={len(bids) if bids else 0}")
+                                            print(f"[DEBUG-Lighter] {symbol}: Empty orderbook (asks={len(asks) if asks else 0}, bids={len(bids) if bids else 0})")
 
-                                print(f"[DEBUG-Lighter] Market {self.market} not found in order_book_details")
+                                print(f"[DEBUG-Lighter] ⚠️ Market '{self.market}' not found!")
                             else:
                                 print(f"[DEBUG-Lighter] Invalid response structure or no order_book_details")
                             return None
