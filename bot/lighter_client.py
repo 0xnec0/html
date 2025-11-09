@@ -240,17 +240,14 @@ class LighterClient:
             print(f"   Price: {limit_price} → {price_int} (decimals: {price_decimals})")
             print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
 
-            # Place limit order with IOC (acts as market order)
-            tx, tx_hash, err = await self.client.create_order(
+            # Place market order using create_market_order
+            tx, tx_hash, err = await self.client.create_market_order(
                 market_index=market_id,
                 base_amount=base_amount_int,  # Integer
-                price=price_int,  # Integer
+                avg_execution_price=price_int,  # Integer - max acceptable price
                 is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
-                order_type=lighter.SignerClient.ORDER_TYPE_LIMIT,  # Use SDK constant
                 client_order_index=client_order_index,
-                time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,  # Use SDK constant for IOC
                 reduce_only=False,  # Not reducing existing position
-                trigger_price=0,  # No trigger price for market execution
             )
 
             if err is not None:
