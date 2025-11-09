@@ -225,6 +225,7 @@ class ParadexClient:
                 summary = await self._make_request("GET", f"/markets/summary?market={self.market}")
 
             if not summary:
+                print(f"[DEBUG-Paradex] summary is None")
                 return None
 
             # Find market
@@ -245,7 +246,10 @@ class ParadexClient:
 
                     if bid > 0 and ask > 0:
                         return (bid, ask)
+                    else:
+                        print(f"[DEBUG-Paradex] bid={bid}, ask={ask} (invalid)")
 
+            print(f"[DEBUG-Paradex] Market {self.market} not found")
             return None
 
         except Exception as e:

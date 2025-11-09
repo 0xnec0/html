@@ -215,14 +215,22 @@ class LighterClient:
 
                                             if best_bid > 0 and best_ask > 0:
                                                 return (best_bid, best_ask)
+                                        else:
+                                            print(f"[DEBUG-Lighter] Empty orderbook: asks={len(asks) if asks else 0}, bids={len(bids) if bids else 0}")
 
+                                print(f"[DEBUG-Lighter] Market {self.market} not found in order_book_details")
+                            else:
+                                print(f"[DEBUG-Lighter] Invalid response structure or no order_book_details")
                             return None
                         else:
+                            print(f"[DEBUG-Lighter] HTTP {response.status}")
                             return None
 
                 except asyncio.TimeoutError:
+                    print(f"[DEBUG-Lighter] Timeout")
                     return None
-                except aiohttp.ClientError:
+                except aiohttp.ClientError as e:
+                    print(f"[DEBUG-Lighter] ClientError: {e}")
                     return None
 
         except Exception:
