@@ -37,6 +37,60 @@ class DeltaNeutralStrategy:
         self.current_position = None
         self.notifier = DiscordNotifier()
 
+    async def _wait_for_tight_spread(self, max_spread_pct: float, check_interval: float, timeout: float) -> Optional[tuple]:
+        """
+        Wait for spread between exchanges to be within acceptable range
+
+        Args:
+            max_spread_pct: Maximum allowed spread in percentage (e.g., 0.02 for 0.02%)
+            check_interval: How often to check prices in seconds
+            timeout: How long to wait before giving up (0 = infinite)
+
+        Returns:
+            Tuple of (paradex_price, lighter_price) if condition met, None if timeout
+        """
+        print(f"\n⏳ Waiting for tight spread (≤ {max_spread_pct}%)...")
+        print(f"   Check interval: {check_interval}s")
+        print(f"   Timeout: {'∞ (infinite)' if timeout == 0 else f'{timeout}s'}")
+
+        start_time = datetime.now()
+        check_count = 0
+
+        while True:
+            check_count += 1
+
+            # Get current prices
+            paradex_price, lighter_price = await self.bot.get_prices()
+
+            if not paradex_price or not lighter_price:
+                print(f"\r   [{check_count}] ❌ Failed to fetch prices, retrying...", end='', flush=True)
+                await asyncio.sleep(check_interval)
+                continue
+
+            # Calculate spread
+            avg_price = (paradex_price + lighter_price) / 2
+            spread = abs(paradex_price - lighter_price)
+            spread_pct = (spread / avg_price) * 100
+
+            # Display current status
+            elapsed = (datetime.now() - start_time).total_seconds()
+            print(f"\r   [{check_count}] Current spread: {spread_pct:.4f}% | Paradex: ${paradex_price:.4f} | Lighter: ${lighter_price:.4f} | Elapsed: {elapsed:.0f}s", end='', flush=True)
+
+            # Check if spread is acceptable
+            if spread_pct <= max_spread_pct:
+                print(f"\n✅ Spread condition met! {spread_pct:.4f}% ≤ {max_spread_pct}%")
+                return (paradex_price, lighter_price)
+
+            # Check timeout (if not infinite)
+            if timeout > 0:
+                if elapsed >= timeout:
+                    print(f"\n⏰ Timeout reached after {elapsed:.0f}s")
+                    print(f"   Final spread: {spread_pct:.4f}% (target was ≤ {max_spread_pct}%)")
+                    return None
+
+            # Wait before next check
+            await asyncio.sleep(check_interval)
+
     def _save_position_to_file(self):
         """Save current position to file for emergency close"""
         try:
@@ -173,8 +227,19 @@ class DeltaNeutralStrategy:
         print(f"   Leverage: {self.leverage}x")
         print(f"   Capital: {self.capital_percentage*100}%")
 
-        # Get current prices
-        paradex_price, lighter_price = await self.bot.get_prices()
+        # Get spread monitoring configuration
+        max_spread_pct = self.bot.config.spread_max_pct
+        check_interval = self.bot.config.spread_check_interval
+        timeout = self.bot.config.spread_check_timeout
+
+        # Wait for tight spread
+        price_result = await self._wait_for_tight_spread(max_spread_pct, check_interval, timeout)
+
+        if price_result is None:
+            print("❌ Failed to achieve target spread within timeout")
+            return {'success': False, 'error': 'Spread timeout'}
+
+        paradex_price, lighter_price = price_result
 
         if not paradex_price or not lighter_price:
             print("❌ Failed to get prices")

@@ -170,6 +170,25 @@ class Config:
         hours = os.getenv('DELTA_NEUTRAL_MAX_HOURS', self.config_data.get('delta_neutral', {}).get('max_hours', '3.0'))
         return float(hours)
 
+    # Spread Monitoring Configuration
+    @property
+    def spread_max_pct(self) -> float:
+        """Maximum allowed spread in percentage"""
+        pct = os.getenv('SPREAD_MAX_PCT', self.config_data.get('spread', {}).get('max_pct', '0.02'))
+        return float(pct)
+
+    @property
+    def spread_check_interval(self) -> float:
+        """Spread check interval in seconds"""
+        interval = os.getenv('SPREAD_CHECK_INTERVAL', self.config_data.get('spread', {}).get('check_interval', '2'))
+        return float(interval)
+
+    @property
+    def spread_check_timeout(self) -> float:
+        """Spread check timeout in seconds (0 = infinite)"""
+        timeout = os.getenv('SPREAD_CHECK_TIMEOUT', self.config_data.get('spread', {}).get('check_timeout', '0'))
+        return float(timeout)
+
     def validate(self) -> bool:
         """
         Validate required configuration
