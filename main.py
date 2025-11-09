@@ -68,6 +68,12 @@ async def main():
     delta_parser.add_argument('--max-hours', type=float, default=3.0, help='Maximum hold time in hours (default: 3.0)')
     delta_parser.add_argument('--max-cycles', type=int, help='Maximum cycles (default: unlimited)')
 
+    # Close All command
+    close_parser = subparsers.add_parser('close-all', help='Close all open positions (emergency stop)')
+    close_parser.add_argument('--size', type=float, help='Position size to close (required)')
+    close_parser.add_argument('--paradex-only', action='store_true', help='Close Paradex positions only')
+    close_parser.add_argument('--lighter-only', action='store_true', help='Close Lighter positions only')
+
     args = parser.parse_args()
 
     # Load configuration
@@ -161,6 +167,55 @@ async def main():
                 hold_time_hours=(min_hours, max_hours),
                 max_cycles=args.max_cycles
             )
+
+        elif args.command == 'close-all':
+            if not args.size:
+                print("❌ --size is required for close-all command")
+                print("   Example: python main.py close-all --size 156")
+                sys.exit(1)
+
+            print("\n" + "="*60)
+            print("🛑 EMERGENCY STOP - Closing All Positions")
+            print("="*60)
+            print(f"   Position size: {args.size}")
+
+            # Get current prices for reference
+            paradex_price, lighter_price = await bot.get_prices()
+
+            print(f"\n📊 Current prices:")
+            if paradex_price:
+                print(f"   Paradex: ${paradex_price:.4f}")
+            if lighter_price:
+                print(f"   Lighter: ${lighter_price:.4f}")
+
+            # Close positions
+            tasks = []
+
+            if not args.lighter_only:
+                print(f"\n🔄 Closing Paradex position (SELL {args.size})...")
+                tasks.append(bot.paradex.place_market_order('SELL', args.size))
+
+            if not args.paradex_only:
+                print(f"🔄 Closing Lighter position (BUY {args.size})...")
+                tasks.append(bot.lighter.place_market_order('BUY', args.size))
+
+            # Execute closures
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Check results
+                success_count = 0
+                for i, result in enumerate(results):
+                    if not isinstance(result, Exception) and result:
+                        success_count += 1
+
+                print(f"\n✅ Closed {success_count}/{len(tasks)} positions successfully")
+
+                if success_count < len(tasks):
+                    print("⚠️  Some positions failed to close - check manually!")
+                    sys.exit(1)
+            else:
+                print("⚠️  No positions to close")
 
         else:
             parser.print_help()

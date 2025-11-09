@@ -284,6 +284,34 @@ DELTA_NEUTRAL_MAX_HOURS=3.0      # 最大保持時間
 
 **Ctrl+C**で安全に停止できます。
 
+### 🛑 緊急停止 - 全ポジションクローズ
+
+デルタニュートラル戦略やその他の取引で開いたポジションを緊急で決済したい場合：
+
+```bash
+# 両取引所のポジションを決済（サイズを指定）
+python main.py close-all --size 156
+
+# Paradexのポジションのみ決済
+python main.py close-all --size 156 --paradex-only
+
+# Lighterのポジションのみ決済
+python main.py close-all --size 156 --lighter-only
+```
+
+**動作：**
+- Paradex: SELL注文（ロングポジションをクローズ）
+- Lighter: BUY注文（ショートポジションをクローズ）
+- 両注文を同時実行
+
+**使用例：**
+```bash
+# デルタニュートラル戦略で156単位のポジションを持っている場合
+python main.py close-all --size 156
+```
+
+**注意：** ポジションサイズは正確に指定してください。わからない場合は取引所のUIで確認してください。
+
 ## 設定ファイルを使用
 
 ```bash
