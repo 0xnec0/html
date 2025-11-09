@@ -201,11 +201,6 @@ class LighterClient:
 
                             # Extract bid/ask from orderBookDetails response
                             if isinstance(data, dict) and 'order_book_details' in data:
-                                # デバッグ: 利用可能なマーケットをリスト表示
-                                available_markets = [book.get('symbol', 'UNKNOWN') for book in data['order_book_details']]
-                                print(f"[DEBUG-Lighter] 利用可能なマーケット: {', '.join(available_markets)}")
-                                print(f"[DEBUG-Lighter] 探しているマーケット: {self.market}")
-
                                 for book in data['order_book_details']:
                                     symbol = book.get('symbol', '')
 
@@ -223,21 +218,32 @@ class LighterClient:
                                             if best_bid > 0 and best_ask > 0:
                                                 return (best_bid, best_ask)
                                         else:
-                                            print(f"[DEBUG-Lighter] {symbol}: Empty orderbook (asks={len(asks) if asks else 0}, bids={len(bids) if bids else 0})")
+                                            # Orderbook is empty, use last_trade_price as fallback
+                                            last_price = book.get('last_trade_price', 0)
+                                            if last_price and float(last_price) > 0:
+                                                last_price = float(last_price)
+                                                # Estimate bid/ask with small spread (0.01%)
+                                                spread = last_price * 0.0001
+                                                estimated_bid = last_price - spread / 2
+                                                estimated_ask = last_price + spread / 2
+                                                print(f"⚠️  {symbol}: オーダーブック空 - 最終取引価格を使用 (${last_price:.4f})")
+                                                return (estimated_bid, estimated_ask)
+                                            else:
+                                                print(f"❌ {symbol}: オーダーブックと最終取引価格がありません")
 
-                                print(f"[DEBUG-Lighter] ⚠️ Market '{self.market}' not found!")
+                                print(f"❌ Market '{self.market}' not found!")
                             else:
-                                print(f"[DEBUG-Lighter] Invalid response structure or no order_book_details")
+                                print(f"❌ Invalid response structure")
                             return None
                         else:
-                            print(f"[DEBUG-Lighter] HTTP {response.status}")
+                            print(f"❌ HTTP {response.status}")
                             return None
 
                 except asyncio.TimeoutError:
-                    print(f"[DEBUG-Lighter] Timeout")
+                    print(f"❌ Timeout")
                     return None
                 except aiohttp.ClientError as e:
-                    print(f"[DEBUG-Lighter] ClientError: {e}")
+                    print(f"❌ ClientError: {e}")
                     return None
 
         except Exception:
