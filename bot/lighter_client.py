@@ -195,7 +195,7 @@ class LighterClient:
                 url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
 
                 try:
-                    async with session.get(url, proxy=self.proxy_url) as response:
+                    async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                         if response.status == 200:
                             data = await response.json()
 
@@ -207,26 +207,25 @@ class LighterClient:
                                         asks = book.get('asks', [])
                                         bids = book.get('bids', [])
 
-                                        if asks and bids:
+                                        if asks and bids and len(asks) > 0 and len(bids) > 0:
                                             # asks[0] = [price, size]
                                             # bids[0] = [price, size]
-                                            best_ask = float(asks[0][0]) if asks[0] else 0
-                                            best_bid = float(bids[0][0]) if bids[0] else 0
+                                            best_ask = float(asks[0][0])
+                                            best_bid = float(bids[0][0])
 
                                             if best_bid > 0 and best_ask > 0:
                                                 return (best_bid, best_ask)
 
                             return None
                         else:
-                            print(f"❌ Lighter API error: Status {response.status}")
                             return None
 
-                except aiohttp.ClientError as e:
-                    print(f"❌ Lighter network error: {e}")
+                except asyncio.TimeoutError:
+                    return None
+                except aiohttp.ClientError:
                     return None
 
-        except Exception as e:
-            print(f"❌ Lighter error: {e}")
+        except Exception:
             return None
 
     async def place_market_order(self, side: str, size: float) -> Optional[Dict[str, Any]]:

@@ -231,9 +231,17 @@ class ParadexClient:
             results = summary.get('results', []) if isinstance(summary, dict) else summary
 
             for market_data in results:
-                if market_data.get('symbol') == self.market:
-                    bid = float(market_data.get('bid', 0))
-                    ask = float(market_data.get('ask', 0))
+                # Handle both dict and object responses
+                symbol = market_data.get('symbol') if isinstance(market_data, dict) else getattr(market_data, 'symbol', None)
+
+                if symbol == self.market:
+                    # Extract bid/ask from dict or object
+                    if isinstance(market_data, dict):
+                        bid = float(market_data.get('bid', 0) or 0)
+                        ask = float(market_data.get('ask', 0) or 0)
+                    else:
+                        bid = float(getattr(market_data, 'bid', 0) or 0)
+                        ask = float(getattr(market_data, 'ask', 0) or 0)
 
                     if bid > 0 and ask > 0:
                         return (bid, ask)
@@ -241,7 +249,7 @@ class ParadexClient:
             return None
 
         except Exception as e:
-            print(f"❌ Paradex error: {e}")
+            print(f"❌ Paradex bid/ask error: {e}")
             return None
 
     async def place_market_order(self, side: str, size: float) -> Optional[Dict[str, Any]]:

@@ -165,10 +165,6 @@ class DeltaNeutralStrategy:
         paradex_balance_info = await self.bot.paradex.get_account_balance()
         lighter_balance_info = await self.bot.lighter.get_account_balance()
 
-        # Debug: show raw responses
-        print(f"   DEBUG - Paradex response: {paradex_balance_info}")
-        print(f"   DEBUG - Lighter response: {lighter_balance_info}")
-
         # Extract USDC balance (assuming USDC as collateral)
         paradex_balance = 0.0
         lighter_balance = 0.0
