@@ -302,9 +302,24 @@ class DeltaNeutralStrategy:
         # Get current prices
         paradex_price, lighter_price = await self.bot.get_prices()
 
+        # Check if prices are available
+        if not paradex_price or not lighter_price:
+            print("⚠️  Failed to fetch current prices for closing")
+            print("   Using saved entry prices as reference...")
+            # Use entry prices if current prices unavailable
+            paradex_price = self.current_position.get('paradex_price', 0)
+            lighter_price = self.current_position.get('lighter_price', 0)
+
         print(f"\n📊 Closing positions...")
-        print(f"   Paradex: SELL {position_size} @ ${paradex_price:.4f}")
-        print(f"   Lighter: BUY {position_size} @ ${lighter_price:.4f}")
+        if paradex_price:
+            print(f"   Paradex: SELL {position_size} @ ${paradex_price:.4f}")
+        else:
+            print(f"   Paradex: SELL {position_size} @ (price unavailable)")
+
+        if lighter_price:
+            print(f"   Lighter: BUY {position_size} @ ${lighter_price:.4f}")
+        else:
+            print(f"   Lighter: BUY {position_size} @ (price unavailable)")
 
         # Execute both orders simultaneously
         tasks = [
