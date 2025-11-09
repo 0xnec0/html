@@ -70,7 +70,7 @@ async def main():
 
     # Close All command
     close_parser = subparsers.add_parser('close-all', help='Close all open positions (emergency stop)')
-    close_parser.add_argument('--size', type=float, help='Position size to close (required)')
+    close_parser.add_argument('--size', type=float, help='Position size to close (optional - auto-detected if not specified)')
     close_parser.add_argument('--paradex-only', action='store_true', help='Close Paradex positions only')
     close_parser.add_argument('--lighter-only', action='store_true', help='Close Lighter positions only')
 
@@ -169,15 +169,26 @@ async def main():
             )
 
         elif args.command == 'close-all':
-            if not args.size:
-                print("❌ --size is required for close-all command")
-                print("   Example: python main.py close-all --size 156")
-                sys.exit(1)
+            # Try to auto-detect position size if not specified
+            position_size = args.size
+
+            if not position_size:
+                # Try to load from saved position file
+                saved_position = DeltaNeutralStrategy.load_current_position()
+                if saved_position and 'size' in saved_position:
+                    position_size = saved_position['size']
+                    print(f"ℹ️  Auto-detected position size from saved data: {position_size}")
+                else:
+                    print("❌ No position size specified and no saved position found")
+                    print("   Either:")
+                    print("   1. Specify size manually: python main.py close-all --size 156")
+                    print("   2. Or make sure delta-neutral strategy has saved position data")
+                    sys.exit(1)
 
             print("\n" + "="*60)
             print("🛑 EMERGENCY STOP - Closing All Positions")
             print("="*60)
-            print(f"   Position size: {args.size}")
+            print(f"   Position size: {position_size}")
 
             # Get current prices for reference
             paradex_price, lighter_price = await bot.get_prices()
@@ -192,12 +203,12 @@ async def main():
             tasks = []
 
             if not args.lighter_only:
-                print(f"\n🔄 Closing Paradex position (SELL {args.size})...")
-                tasks.append(bot.paradex.place_market_order('SELL', args.size))
+                print(f"\n🔄 Closing Paradex position (SELL {position_size})...")
+                tasks.append(bot.paradex.place_market_order('SELL', position_size))
 
             if not args.paradex_only:
-                print(f"🔄 Closing Lighter position (BUY {args.size})...")
-                tasks.append(bot.lighter.place_market_order('BUY', args.size))
+                print(f"🔄 Closing Lighter position (BUY {position_size})...")
+                tasks.append(bot.lighter.place_market_order('BUY', position_size))
 
             # Execute closures
             if tasks:

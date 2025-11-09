@@ -32,6 +32,9 @@ config.json
 *.key
 *.pem
 
+# Position tracking files
+.current_position.json
+
 # IDE
 .vscode/
 .idea/

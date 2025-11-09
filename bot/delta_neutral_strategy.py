@@ -5,6 +5,8 @@ Automatically opens and closes hedged positions on Paradex (long) and Lighter (s
 
 import asyncio
 import random
+import json
+import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 from .trading_bot import TradingBot
@@ -12,6 +14,8 @@ from .trading_bot import TradingBot
 
 class DeltaNeutralStrategy:
     """Delta neutral strategy with automatic position rotation"""
+
+    POSITION_FILE = ".current_position.json"
 
     def __init__(self, bot: TradingBot, leverage: int = 10, capital_percentage: float = 0.5, usd_amount: float = None):
         """
@@ -29,6 +33,33 @@ class DeltaNeutralStrategy:
         self.usd_amount = usd_amount
         self.position_open = False
         self.current_position = None
+
+    def _save_position_to_file(self):
+        """Save current position to file for emergency close"""
+        try:
+            with open(self.POSITION_FILE, 'w') as f:
+                json.dump(self.current_position, f, indent=2)
+        except Exception as e:
+            print(f"⚠️  Failed to save position to file: {e}")
+
+    def _remove_position_file(self):
+        """Remove position file after closing"""
+        try:
+            if os.path.exists(self.POSITION_FILE):
+                os.remove(self.POSITION_FILE)
+        except Exception as e:
+            print(f"⚠️  Failed to remove position file: {e}")
+
+    @staticmethod
+    def load_current_position() -> Optional[Dict[str, Any]]:
+        """Load current position from file"""
+        try:
+            if os.path.exists(DeltaNeutralStrategy.POSITION_FILE):
+                with open(DeltaNeutralStrategy.POSITION_FILE, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"⚠️  Failed to load position from file: {e}")
+        return None
 
     async def get_available_balance(self) -> Dict[str, float]:
         """
@@ -192,6 +223,10 @@ class DeltaNeutralStrategy:
                 'paradex_result': paradex_result,
                 'lighter_result': lighter_result
             }
+
+            # Save position to file for emergency close
+            self._save_position_to_file()
+
             print("\n✅ Delta neutral position opened successfully!")
         else:
             print("\n❌ Failed to open delta neutral position")
@@ -265,6 +300,10 @@ class DeltaNeutralStrategy:
 
             self.position_open = False
             self.current_position = None
+
+            # Remove position file
+            self._remove_position_file()
+
             print("\n✅ Delta neutral position closed successfully!")
         else:
             print("\n❌ Failed to close delta neutral position")

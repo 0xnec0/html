@@ -289,28 +289,42 @@ DELTA_NEUTRAL_MAX_HOURS=3.0      # 最大保持時間
 デルタニュートラル戦略やその他の取引で開いたポジションを緊急で決済したい場合：
 
 ```bash
-# 両取引所のポジションを決済（サイズを指定）
+# 自動検出（デルタニュートラル戦略のポジション情報を使用）
+python main.py close-all
+
+# サイズを手動指定
 python main.py close-all --size 156
 
 # Paradexのポジションのみ決済
-python main.py close-all --size 156 --paradex-only
+python main.py close-all --paradex-only
 
 # Lighterのポジションのみ決済
-python main.py close-all --size 156 --lighter-only
+python main.py close-all --lighter-only
 ```
 
 **動作：**
+- デルタニュートラル戦略が保存したポジション情報を自動読み込み
 - Paradex: SELL注文（ロングポジションをクローズ）
 - Lighter: BUY注文（ショートポジションをクローズ）
 - 両注文を同時実行
 
+**自動検出の仕組み：**
+- デルタニュートラル戦略がポジションを開くと `.current_position.json` に情報を保存
+- `close-all` コマンドは自動的にこのファイルを読み込む
+- ポジションを閉じると自動的にファイルを削除
+
 **使用例：**
 ```bash
-# デルタニュートラル戦略で156単位のポジションを持っている場合
-python main.py close-all --size 156
+# デルタニュートラル戦略実行中
+python main.py delta-neutral --usd-amount 50
+
+# 別のターミナルから緊急停止（サイズ自動検出）
+python main.py close-all
 ```
 
-**注意：** ポジションサイズは正確に指定してください。わからない場合は取引所のUIで確認してください。
+**注意：**
+- デルタニュートラル戦略以外のポジションは `--size` を手動指定してください
+- 自動検出が失敗した場合はエラーメッセージが表示されます
 
 ## 設定ファイルを使用
 
