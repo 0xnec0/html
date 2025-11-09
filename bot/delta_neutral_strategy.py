@@ -39,7 +39,7 @@ class DeltaNeutralStrategy:
 
     async def _wait_for_tight_spread(self, max_spread_pct: float, check_interval: float, timeout: float) -> Optional[tuple]:
         """
-        Wait for spread between exchanges to be within acceptable range
+        Wait for bid-ask spread on EACH exchange to be within acceptable range
 
         Args:
             max_spread_pct: Maximum allowed spread in percentage (e.g., 0.02 for 0.02%)
@@ -47,11 +47,11 @@ class DeltaNeutralStrategy:
             timeout: How long to wait before giving up (0 = infinite)
 
         Returns:
-            Tuple of (paradex_price, lighter_price) if condition met, None if timeout
+            Tuple of (paradex_mid_price, lighter_mid_price) if condition met, None if timeout
         """
-        print(f"\n⏳ Waiting for tight spread (≤ {max_spread_pct}%)...")
-        print(f"   Check interval: {check_interval}s")
-        print(f"   Timeout: {'∞ (infinite)' if timeout == 0 else f'{timeout}s'}")
+        print(f"\n⏳ 各取引所のスプレッドを監視中... (≤ {max_spread_pct}%)")
+        print(f"   チェック間隔: {check_interval}秒")
+        print(f"   タイムアウト: {'∞ (無限)' if timeout == 0 else f'{timeout}秒'}")
 
         start_time = datetime.now()
         check_count = 0
@@ -59,33 +59,47 @@ class DeltaNeutralStrategy:
         while True:
             check_count += 1
 
-            # Get current prices
-            paradex_price, lighter_price = await self.bot.get_prices()
+            # Get bid/ask prices from both exchanges
+            paradex_bid_ask = await self.bot.paradex.get_bid_ask()
+            lighter_bid_ask = await self.bot.lighter.get_bid_ask()
 
-            if not paradex_price or not lighter_price:
-                print(f"\r   [{check_count}] ❌ Failed to fetch prices, retrying...", end='', flush=True)
+            if not paradex_bid_ask or not lighter_bid_ask:
+                print(f"\r   [{check_count}] ❌ 価格取得失敗、リトライ中...", end='', flush=True)
                 await asyncio.sleep(check_interval)
                 continue
 
-            # Calculate spread
-            avg_price = (paradex_price + lighter_price) / 2
-            spread = abs(paradex_price - lighter_price)
-            spread_pct = (spread / avg_price) * 100
+            # Extract bid/ask
+            paradex_bid, paradex_ask = paradex_bid_ask
+            lighter_bid, lighter_ask = lighter_bid_ask
+
+            # Calculate mid prices
+            paradex_mid = (paradex_bid + paradex_ask) / 2
+            lighter_mid = (lighter_bid + lighter_ask) / 2
+
+            # Calculate bid-ask spread for each exchange
+            paradex_spread = abs(paradex_ask - paradex_bid)
+            paradex_spread_pct = (paradex_spread / paradex_mid) * 100
+
+            lighter_spread = abs(lighter_ask - lighter_bid)
+            lighter_spread_pct = (lighter_spread / lighter_mid) * 100
 
             # Display current status
             elapsed = (datetime.now() - start_time).total_seconds()
-            print(f"\r   [{check_count}] Current spread: {spread_pct:.4f}% | Paradex: ${paradex_price:.4f} | Lighter: ${lighter_price:.4f} | Elapsed: {elapsed:.0f}s", end='', flush=True)
+            print(f"\r   [{check_count}] Paradex: {paradex_spread_pct:.4f}% | Lighter: {lighter_spread_pct:.4f}% | 経過: {elapsed:.0f}秒", end='', flush=True)
 
-            # Check if spread is acceptable
-            if spread_pct <= max_spread_pct:
-                print(f"\n✅ Spread condition met! {spread_pct:.4f}% ≤ {max_spread_pct}%")
-                return (paradex_price, lighter_price)
+            # Check if BOTH spreads are acceptable
+            if paradex_spread_pct <= max_spread_pct and lighter_spread_pct <= max_spread_pct:
+                print(f"\n✅ スプレッド条件達成!")
+                print(f"   Paradex: {paradex_spread_pct:.4f}% (Bid: ${paradex_bid:.4f}, Ask: ${paradex_ask:.4f})")
+                print(f"   Lighter: {lighter_spread_pct:.4f}% (Bid: ${lighter_bid:.4f}, Ask: ${lighter_ask:.4f})")
+                return (paradex_mid, lighter_mid)
 
             # Check timeout (if not infinite)
             if timeout > 0:
                 if elapsed >= timeout:
-                    print(f"\n⏰ Timeout reached after {elapsed:.0f}s")
-                    print(f"   Final spread: {spread_pct:.4f}% (target was ≤ {max_spread_pct}%)")
+                    print(f"\n⏰ タイムアウト到達 ({elapsed:.0f}秒)")
+                    print(f"   Paradex: {paradex_spread_pct:.4f}% | Lighter: {lighter_spread_pct:.4f}%")
+                    print(f"   目標: ≤{max_spread_pct}%")
                     return None
 
             # Wait before next check

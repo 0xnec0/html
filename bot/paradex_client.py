@@ -209,6 +209,41 @@ class ParadexClient:
             print(f"❌ Paradex error: {e}")
             return None
 
+    async def get_bid_ask(self) -> Optional[tuple]:
+        """
+        Get current bid and ask prices
+
+        Returns:
+            Tuple of (bid, ask) or None if error
+        """
+        try:
+            # Try SDK first
+            if self.client:
+                summary = self.client.api_client.fetch_markets_summary({"market": self.market})
+            else:
+                # Use REST API
+                summary = await self._make_request("GET", f"/markets/summary?market={self.market}")
+
+            if not summary:
+                return None
+
+            # Find market
+            results = summary.get('results', []) if isinstance(summary, dict) else summary
+
+            for market_data in results:
+                if market_data.get('symbol') == self.market:
+                    bid = float(market_data.get('bid', 0))
+                    ask = float(market_data.get('ask', 0))
+
+                    if bid > 0 and ask > 0:
+                        return (bid, ask)
+
+            return None
+
+        except Exception as e:
+            print(f"❌ Paradex error: {e}")
+            return None
+
     async def place_market_order(self, side: str, size: float) -> Optional[Dict[str, Any]]:
         """
         Place a market order

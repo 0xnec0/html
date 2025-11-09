@@ -182,6 +182,53 @@ class LighterClient:
             print(f"❌ Lighter price fetch error: {e}")
             return None
 
+    async def get_bid_ask(self) -> Optional[tuple]:
+        """
+        Get current bid and ask prices
+
+        Returns:
+            Tuple of (bid, ask) or None if error
+        """
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
+
+                try:
+                    async with session.get(url, proxy=self.proxy_url) as response:
+                        if response.status == 200:
+                            data = await response.json()
+
+                            # Extract bid/ask from orderBookDetails response
+                            if isinstance(data, dict) and 'order_book_details' in data:
+                                for book in data['order_book_details']:
+                                    if book.get('symbol', '').upper() == self.market.upper():
+                                        # Get best bid (highest buy price) and best ask (lowest sell price)
+                                        asks = book.get('asks', [])
+                                        bids = book.get('bids', [])
+
+                                        if asks and bids:
+                                            # asks[0] = [price, size]
+                                            # bids[0] = [price, size]
+                                            best_ask = float(asks[0][0]) if asks[0] else 0
+                                            best_bid = float(bids[0][0]) if bids[0] else 0
+
+                                            if best_bid > 0 and best_ask > 0:
+                                                return (best_bid, best_ask)
+
+                            return None
+                        else:
+                            print(f"❌ Lighter API error: Status {response.status}")
+                            return None
+
+                except aiohttp.ClientError as e:
+                    print(f"❌ Lighter network error: {e}")
+                    return None
+
+        except Exception as e:
+            print(f"❌ Lighter error: {e}")
+            return None
+
     async def place_market_order(self, side: str, size: float) -> Optional[Dict[str, Any]]:
         """
         Place a market order
