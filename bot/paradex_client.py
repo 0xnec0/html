@@ -248,7 +248,8 @@ class ParadexClient:
                     order_side=OrderSide.Buy if side.upper() == 'BUY' else OrderSide.Sell,
                     size=Decimal(str(size)),
                     limit_price=Decimal(str(limit_price)),
-                    instruction="IOC"  # Immediate or Cancel
+                    instruction="IOC",  # Immediate or Cancel
+                    max_slippage="auto"  # Auto slippage tolerance
                 )
                 result = self.client.api_client.submit_order(order=order)
             else:
@@ -260,6 +261,7 @@ class ParadexClient:
                     'size': str(size),
                     'limit_price': str(limit_price),
                     'time_in_force': 'IOC',  # Immediate or Cancel
+                    'max_slippage': 'auto'  # Auto slippage tolerance
                 }
                 result = await self._make_request("POST", "/orders", order_params, signed=True)
 
