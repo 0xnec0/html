@@ -161,22 +161,33 @@ class DeltaNeutralStrategy:
 
         if paradex_balance_info:
             # Extract balance from Paradex response
-            # Format depends on API response structure
-            if isinstance(paradex_balance_info, dict):
-                # Try different possible keys
-                paradex_balance = float(paradex_balance_info.get('available_balance', 0) or
-                                      paradex_balance_info.get('equity', 0) or
-                                      paradex_balance_info.get('balance', 0) or
-                                      paradex_balance_info.get('available_withdrawal_balance', 0) or
-                                      paradex_balance_info.get('cross_balance', 0) or 0)
+            # Paradex returns AccountSummary object with attributes
+            if hasattr(paradex_balance_info, 'total_collateral'):
+                # SDK response (AccountSummary object)
+                paradex_balance = float(paradex_balance_info.total_collateral or 0)
+            elif hasattr(paradex_balance_info, 'free_collateral'):
+                paradex_balance = float(paradex_balance_info.free_collateral or 0)
+            elif isinstance(paradex_balance_info, dict):
+                # REST API response (dict)
+                paradex_balance = float(paradex_balance_info.get('total_collateral', 0) or
+                                      paradex_balance_info.get('free_collateral', 0) or
+                                      paradex_balance_info.get('available_balance', 0) or 0)
 
         if lighter_balance_info:
             # Extract balance from Lighter response
             if isinstance(lighter_balance_info, dict):
-                lighter_balance = float(lighter_balance_info.get('available_balance', 0) or
-                                      lighter_balance_info.get('equity', 0) or
-                                      lighter_balance_info.get('balance', 0) or
-                                      lighter_balance_info.get('free_collateral', 0) or 0)
+                # Lighter API response has 'accounts' array
+                if 'accounts' in lighter_balance_info and len(lighter_balance_info['accounts']) > 0:
+                    account = lighter_balance_info['accounts'][0]
+                    lighter_balance = float(account.get('total_asset_value', 0) or
+                                          account.get('available_balance', 0) or
+                                          account.get('collateral', 0) or 0)
+                else:
+                    # Direct balance keys
+                    lighter_balance = float(lighter_balance_info.get('total_asset_value', 0) or
+                                          lighter_balance_info.get('available_balance', 0) or
+                                          lighter_balance_info.get('equity', 0) or
+                                          lighter_balance_info.get('balance', 0) or 0)
 
         balances = {
             'paradex': paradex_balance,
