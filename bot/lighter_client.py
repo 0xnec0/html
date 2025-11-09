@@ -249,6 +249,8 @@ class LighterClient:
                 order_type=lighter.SignerClient.ORDER_TYPE_LIMIT,  # Use SDK constant
                 client_order_index=client_order_index,
                 time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,  # Use SDK constant for IOC
+                reduce_only=False,  # Not reducing existing position
+                trigger_price=0,  # No trigger price for market execution
             )
 
             if err is not None:
