@@ -176,30 +176,38 @@ async def main():
                 import random
                 from datetime import datetime, timedelta
 
-                # Open position
-                open_result = await strategy.open_delta_neutral_position()
+                try:
+                    # Open position
+                    open_result = await strategy.open_delta_neutral_position()
 
-                if not open_result['success']:
-                    print("❌ Failed to open position")
-                    sys.exit(1)
+                    if not open_result['success']:
+                        print("❌ Failed to open position")
+                        sys.exit(1)
 
-                # Calculate hold time
-                hold_seconds = random.uniform(min_hours * 3600, max_hours * 3600)
-                hold_minutes = hold_seconds / 60
-                close_time = datetime.now() + timedelta(seconds=hold_seconds)
+                    # Calculate hold time
+                    hold_seconds = random.uniform(min_hours * 3600, max_hours * 3600)
+                    hold_minutes = hold_seconds / 60
+                    close_time = datetime.now() + timedelta(seconds=hold_seconds)
 
-                print(f"\n⏰ Position will close at: {close_time.strftime('%Y-%m-%d %H:%M:%S')}")
-                print(f"   (holding for {hold_minutes:.1f} minutes)")
+                    print(f"\n⏰ Position will close at: {close_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                    print(f"   (holding for {hold_minutes:.1f} minutes)")
 
-                # Wait
-                await asyncio.sleep(hold_seconds)
+                    # Wait
+                    await asyncio.sleep(hold_seconds)
 
-                # Close position
-                close_result = await strategy.close_delta_neutral_position()
+                    # Close position
+                    close_result = await strategy.close_delta_neutral_position()
 
-                if not close_result['success']:
-                    print("❌ Failed to close position")
-                    sys.exit(1)
+                    if not close_result['success']:
+                        print("❌ Failed to close position")
+                        sys.exit(1)
+
+                except (KeyboardInterrupt, asyncio.CancelledError):
+                    print("\n\n⚠️  Interrupted by user")
+                    if strategy.position_open:
+                        print("🔄 Closing open position...")
+                        await strategy.close_delta_neutral_position()
+                    raise KeyboardInterrupt
 
         elif args.command == 'close-all':
             # Try to auto-detect position size if not specified
