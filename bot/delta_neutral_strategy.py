@@ -13,7 +13,7 @@ from .trading_bot import TradingBot
 class DeltaNeutralStrategy:
     """Delta neutral strategy with automatic position rotation"""
 
-    def __init__(self, bot: TradingBot, leverage: int = 10, capital_percentage: float = 0.5):
+    def __init__(self, bot: TradingBot, leverage: int = 10, capital_percentage: float = 0.5, usd_amount: float = None):
         """
         Initialize delta neutral strategy
 
@@ -21,10 +21,12 @@ class DeltaNeutralStrategy:
             bot: TradingBot instance
             leverage: Leverage multiplier (default: 10x)
             capital_percentage: Percentage of capital to use (default: 0.5 = 50%)
+            usd_amount: Fixed USD amount to use per position (overrides balance-based calculation)
         """
         self.bot = bot
         self.leverage = leverage
         self.capital_percentage = capital_percentage
+        self.usd_amount = usd_amount
         self.position_open = False
         self.current_position = None
 
@@ -126,19 +128,27 @@ class DeltaNeutralStrategy:
 
         avg_price = (paradex_price + lighter_price) / 2
 
-        # Get balances
-        balances = await self.get_available_balance()
-
-        # Calculate position size based on available balance
-        # Use the smaller balance to ensure both sides can be filled
-        available_balance = min(balances['paradex'], balances['lighter'])
-
-        if available_balance <= 0:
-            print("❌ No available balance detected")
-            print("⚠️  Falling back to test mode with 1.0 unit")
-            position_size = 1.0
+        # Calculate position size
+        if self.usd_amount:
+            # Use fixed USD amount
+            position_size = self.usd_amount / avg_price
+            print(f"\n💵 Using fixed USD amount: ${self.usd_amount:.2f}")
+            print(f"   Price: ${avg_price:.4f}")
+            print(f"   Position size: {position_size:.2f} units")
         else:
-            position_size = await self.calculate_position_size(avg_price, available_balance)
+            # Get balances
+            balances = await self.get_available_balance()
+
+            # Calculate position size based on available balance
+            # Use the smaller balance to ensure both sides can be filled
+            available_balance = min(balances['paradex'], balances['lighter'])
+
+            if available_balance <= 0:
+                print("❌ No available balance detected")
+                print("⚠️  Falling back to test mode with 1.0 unit")
+                position_size = 1.0
+            else:
+                position_size = await self.calculate_position_size(avg_price, available_balance)
 
         print(f"\n📊 Executing delta neutral strategy...")
         print(f"   Paradex: BUY {position_size} @ ${paradex_price:.4f}")

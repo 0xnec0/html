@@ -63,6 +63,7 @@ async def main():
     delta_parser = subparsers.add_parser('delta-neutral', help='Run delta neutral strategy (Paradex LONG + Lighter SHORT)')
     delta_parser.add_argument('--leverage', type=int, default=10, help='Leverage multiplier (default: 10x)')
     delta_parser.add_argument('--capital-pct', type=float, default=0.5, help='Percentage of capital to use (default: 0.5 = 50%%)')
+    delta_parser.add_argument('--usd-amount', type=float, help='Fixed USD amount per position (e.g., 50 for $50)')
     delta_parser.add_argument('--min-hours', type=float, default=2.0, help='Minimum hold time in hours (default: 2.0)')
     delta_parser.add_argument('--max-hours', type=float, default=3.0, help='Maximum hold time in hours (default: 3.0)')
     delta_parser.add_argument('--max-cycles', type=int, help='Maximum cycles (default: unlimited)')
@@ -146,7 +147,8 @@ async def main():
             strategy = DeltaNeutralStrategy(
                 bot=bot,
                 leverage=args.leverage,
-                capital_percentage=args.capital_pct
+                capital_percentage=args.capital_pct,
+                usd_amount=args.usd_amount
             )
             await strategy.run_loop(
                 hold_time_hours=(args.min_hours, args.max_hours),
