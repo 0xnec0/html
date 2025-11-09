@@ -208,12 +208,11 @@ class DeltaNeutralStrategy:
         paradex_result = results[0]
         lighter_result = results[1]
 
-        success = (
-            not isinstance(paradex_result, Exception) and
-            not isinstance(lighter_result, Exception)
-        )
+        paradex_success = not isinstance(paradex_result, Exception) and paradex_result
+        lighter_success = not isinstance(lighter_result, Exception) and lighter_result
 
-        if success:
+        # Check if both succeeded
+        if paradex_success and lighter_success:
             self.position_open = True
             self.current_position = {
                 'timestamp': datetime.now().isoformat(),
@@ -228,7 +227,46 @@ class DeltaNeutralStrategy:
             self._save_position_to_file()
 
             print("\n✅ Delta neutral position opened successfully!")
+
+        # Handle partial failure - close the successful position
+        elif paradex_success and not lighter_success:
+            print("\n⚠️  Partial failure detected: Paradex succeeded but Lighter failed")
+            print("🔄 Automatically closing Paradex position to maintain safety...")
+
+            try:
+                # Close Paradex position (SELL to close LONG)
+                close_result = await self.bot.paradex.place_market_order('SELL', position_size)
+                if close_result:
+                    print("✅ Paradex position closed successfully")
+                else:
+                    print("❌ Failed to close Paradex position - MANUAL INTERVENTION REQUIRED!")
+            except Exception as e:
+                print(f"❌ Error closing Paradex position: {e}")
+                print("⚠️  MANUAL INTERVENTION REQUIRED - Check Paradex for open position!")
+
+            print(f"\n❌ Failed to open delta neutral position")
+            print(f"   Lighter error: {lighter_result}")
+
+        elif lighter_success and not paradex_success:
+            print("\n⚠️  Partial failure detected: Lighter succeeded but Paradex failed")
+            print("🔄 Automatically closing Lighter position to maintain safety...")
+
+            try:
+                # Close Lighter position (BUY to close SHORT)
+                close_result = await self.bot.lighter.place_market_order('BUY', position_size)
+                if close_result:
+                    print("✅ Lighter position closed successfully")
+                else:
+                    print("❌ Failed to close Lighter position - MANUAL INTERVENTION REQUIRED!")
+            except Exception as e:
+                print(f"❌ Error closing Lighter position: {e}")
+                print("⚠️  MANUAL INTERVENTION REQUIRED - Check Lighter for open position!")
+
+            print(f"\n❌ Failed to open delta neutral position")
+            print(f"   Paradex error: {paradex_result}")
+
         else:
+            # Both failed
             print("\n❌ Failed to open delta neutral position")
             if isinstance(paradex_result, Exception):
                 print(f"   Paradex error: {paradex_result}")
@@ -236,8 +274,8 @@ class DeltaNeutralStrategy:
                 print(f"   Lighter error: {lighter_result}")
 
         return {
-            'success': success,
-            'position': self.current_position,
+            'success': paradex_success and lighter_success,
+            'position': self.current_position if paradex_success and lighter_success else None,
             'paradex': paradex_result,
             'lighter': lighter_result
         }
