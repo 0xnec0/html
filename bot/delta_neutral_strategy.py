@@ -412,16 +412,30 @@ class DeltaNeutralStrategy:
 
         position_size = self.current_position['size']
 
-        # Get current prices
-        paradex_price, lighter_price = await self.bot.get_prices()
+        # Get spread monitoring configuration
+        max_spread_pct = self.bot.config.spread_max_pct
+        check_interval = self.bot.config.spread_check_interval
+        timeout = self.bot.config.spread_check_timeout
 
-        # Check if prices are available
-        if not paradex_price or not lighter_price:
-            print("⚠️  Failed to fetch current prices for closing")
+        # Wait for tight spread before closing
+        price_result = await self._wait_for_tight_spread(max_spread_pct, check_interval, timeout)
+
+        if price_result is None:
+            print("⚠️  Failed to achieve target spread within timeout for closing")
             print("   Using saved entry prices as reference...")
-            # Use entry prices if current prices unavailable
+            # Use entry prices if spread timeout
             paradex_price = self.current_position.get('paradex_price', 0)
             lighter_price = self.current_position.get('lighter_price', 0)
+        else:
+            paradex_price, lighter_price = price_result
+
+            # Final check if prices are available
+            if not paradex_price or not lighter_price:
+                print("⚠️  Failed to fetch current prices for closing")
+                print("   Using saved entry prices as reference...")
+                # Use entry prices if current prices unavailable
+                paradex_price = self.current_position.get('paradex_price', 0)
+                lighter_price = self.current_position.get('lighter_price', 0)
 
         print(f"\n📊 Closing positions...")
         if paradex_price:
