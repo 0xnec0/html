@@ -67,8 +67,9 @@ class LighterClient:
 
         print(f"  Market: {self.market}")
 
-        # Cache for market ID lookup
+        # Cache for market ID and decimal info lookup
         self._market_id_cache = {}
+        self._market_info_cache = {}  # Store full market details including decimals
 
     async def _get_market_id_from_api(self, symbol: str) -> Optional[int]:
         """
@@ -96,9 +97,16 @@ class LighterClient:
                                 if book.get('symbol', '').upper() == symbol.upper():
                                     market_id = book.get('market_id')
                                     if market_id is not None:
-                                        # Cache it
+                                        # Cache market_id and full details
                                         self._market_id_cache[symbol] = market_id
+                                        self._market_info_cache[symbol] = book
+
+                                        # Show decimal info
+                                        price_decimals = book.get('price_decimals', 0)
+                                        size_decimals = book.get('size_decimals', 0)
                                         print(f"ℹ️  Found market_id for {symbol}: {market_id}")
+                                        print(f"   Price decimals: {price_decimals}, Size decimals: {size_decimals}")
+
                                         return market_id
         except Exception as e:
             print(f"⚠ Failed to fetch market_id for {symbol}: {e}")
@@ -214,11 +222,29 @@ class LighterClient:
             if market_id is None:
                 raise ValueError(f"Could not find market_id for {self.market}")
 
+            # Get market info for decimal conversion
+            market_info = self._market_info_cache.get(self.market)
+            if not market_info:
+                raise ValueError(f"Market info not found for {self.market}")
+
+            # Extract decimal precision
+            price_decimals = market_info.get('price_decimals', 0)
+            size_decimals = market_info.get('size_decimals', 0)
+
+            # Convert to integers using decimal precision
+            # Lighter SDK requires integers (fixed-point representation)
+            price_int = int(limit_price * (10 ** price_decimals))
+            base_amount_int = int(size * (10 ** size_decimals))
+
+            print(f"ℹ️  Converting to integers:")
+            print(f"   Price: {limit_price} → {price_int} (decimals: {price_decimals})")
+            print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
+
             # Place limit order with IOC (acts as market order)
             tx, tx_hash, err = await self.client.create_order(
                 market_index=market_id,
-                base_amount=float(size),  # Use float instead of string
-                price=float(limit_price),  # Use float instead of string
+                base_amount=base_amount_int,  # Integer
+                price=price_int,  # Integer
                 is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
                 order_type="Limit",  # Order type: Limit, Market, etc.
                 client_order_index=client_order_index,
