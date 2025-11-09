@@ -217,8 +217,8 @@ class LighterClient:
             # Place limit order with IOC (acts as market order)
             tx, tx_hash, err = await self.client.create_order(
                 market_index=market_id,
-                base_amount=str(size),
-                price=str(limit_price),
+                base_amount=float(size),  # Use float instead of string
+                price=float(limit_price),  # Use float instead of string
                 is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
                 order_type="Limit",  # Order type: Limit, Market, etc.
                 client_order_index=client_order_index,
