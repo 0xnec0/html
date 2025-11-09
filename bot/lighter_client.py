@@ -246,9 +246,9 @@ class LighterClient:
                 base_amount=base_amount_int,  # Integer
                 price=price_int,  # Integer
                 is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
-                order_type="Limit",  # Order type: Limit, Market, etc.
+                order_type=lighter.SignerClient.ORDER_TYPE_LIMIT,  # Use SDK constant
                 client_order_index=client_order_index,
-                time_in_force="IOC",  # Immediate or Cancel
+                time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,  # Use SDK constant for IOC
             )
 
             if err is not None:
