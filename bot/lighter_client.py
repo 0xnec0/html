@@ -389,3 +389,8 @@ class LighterClient:
         except Exception as e:
             print(f"❌ Lighter cancel error: {e}")
             return False
+
+    async def close(self):
+        """Close client session"""
+        # Lighter SDK doesn't require explicit cleanup
+        pass

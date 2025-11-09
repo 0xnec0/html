@@ -242,8 +242,8 @@ class DeltaNeutralStrategy:
                 'size': position_size,
                 'paradex_price': paradex_price,
                 'lighter_price': lighter_price,
-                'paradex_result': paradex_result,
-                'lighter_result': lighter_result
+                # Don't save SDK response objects (not JSON serializable)
+                # Just save essential info for position tracking
             }
 
             # Save position to file for emergency close

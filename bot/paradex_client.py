@@ -356,3 +356,9 @@ class ParadexClient:
         except Exception as e:
             print(f"❌ Paradex cancel error: {e}")
             return False
+
+    async def close(self):
+        """Close client session"""
+        # Paradex SDK and REST API don't require explicit cleanup
+        # aiohttp sessions are created with context managers
+        pass

@@ -273,6 +273,10 @@ async def main():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        # Clean up client sessions
+        if 'bot' in locals():
+            await bot.close()
 
     print("\n✅ Done")
 

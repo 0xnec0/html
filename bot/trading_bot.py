@@ -412,3 +412,10 @@ class TradingBot:
         print("="*60)
 
         return results
+
+    async def close(self):
+        """Close all client sessions"""
+        if hasattr(self.paradex, 'close'):
+            await self.paradex.close()
+        if hasattr(self.lighter, 'close'):
+            await self.lighter.close()
