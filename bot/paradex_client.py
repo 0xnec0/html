@@ -248,10 +248,14 @@ class ParadexClient:
                     order_side=OrderSide.Buy if side.upper() == 'BUY' else OrderSide.Sell,
                     size=Decimal(str(size)),
                     limit_price=Decimal(str(limit_price)),
-                    instruction="IOC",  # Immediate or Cancel
-                    max_slippage="auto"  # Auto slippage tolerance
+                    instruction="IOC"  # Immediate or Cancel
                 )
-                result = self.client.api_client.submit_order(order=order)
+                # Try to submit with max_slippage parameter
+                try:
+                    result = self.client.api_client.submit_order(order=order, max_slippage="auto")
+                except TypeError:
+                    # If max_slippage not supported, submit without it
+                    result = self.client.api_client.submit_order(order=order)
             else:
                 # Use REST API
                 order_params = {
