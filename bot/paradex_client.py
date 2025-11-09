@@ -263,29 +263,25 @@ class ParadexClient:
                 # Ensure size is an integer (Paradex requires whole units)
                 size_int = int(size)
 
-                # Use SDK Order object
+                # Use SDK Order object with MARKET type
                 order = Order(
                     market=self.market,
-                    order_type=OrderType.Limit,
+                    order_type=OrderType.Market,
                     order_side=OrderSide.Buy if side.upper() == 'BUY' else OrderSide.Sell,
-                    size=Decimal(str(size_int)),
-                    limit_price=Decimal(str(limit_price)),
-                    instruction="IOC"  # Immediate or Cancel
+                    size=Decimal(str(size_int))
                 )
-                # Submit order (no max_slippage needed when using bid/ask prices)
+                # Submit market order
                 result = self.client.api_client.submit_order(order=order)
             else:
                 # Ensure size is an integer (Paradex requires whole units)
                 size_int = int(size)
 
-                # Use REST API
+                # Use REST API with MARKET type
                 order_params = {
                     'market': self.market,
                     'side': side.upper(),
-                    'type': 'LIMIT',
-                    'size': str(size_int),
-                    'limit_price': str(limit_price),
-                    'time_in_force': 'IOC'  # Immediate or Cancel
+                    'type': 'MARKET',
+                    'size': str(size_int)
                 }
                 result = await self._make_request("POST", "/orders", order_params, signed=True)
 
