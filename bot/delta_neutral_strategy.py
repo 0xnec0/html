@@ -130,13 +130,21 @@ class DeltaNeutralStrategy:
 
         # Calculate position size
         if self.usd_amount:
-            # Use fixed USD amount
-            position_size = self.usd_amount / avg_price
-            # Round down to integer (Paradex requires whole units)
-            position_size = int(position_size)
+            # Calculate position size for each exchange to match USD amount as closely as possible
+            paradex_size = int(self.usd_amount / paradex_price)
+            lighter_size = int(self.usd_amount / lighter_price)
+
+            # Use the smaller size to ensure both can be filled with similar USD amounts
+            position_size = min(paradex_size, lighter_size)
+
+            # Calculate actual USD amounts
+            paradex_usd = position_size * paradex_price
+            lighter_usd = position_size * lighter_price
+
             print(f"\n💵 Using fixed USD amount: ${self.usd_amount:.2f}")
-            print(f"   Price: ${avg_price:.4f}")
-            print(f"   Position size: {position_size} units (rounded down)")
+            print(f"   Paradex price: ${paradex_price:.4f} → {position_size} units = ${paradex_usd:.2f}")
+            print(f"   Lighter price: ${lighter_price:.4f} → {position_size} units = ${lighter_usd:.2f}")
+            print(f"   Position size: {position_size} units")
         else:
             # Get balances
             balances = await self.get_available_balance()
