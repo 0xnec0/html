@@ -66,7 +66,8 @@ async def main():
     delta_parser.add_argument('--usd-amount', type=float, help='Fixed USD amount per position (e.g., 50 for $50)')
     delta_parser.add_argument('--min-hours', type=float, default=2.0, help='Minimum hold time in hours (default: 2.0)')
     delta_parser.add_argument('--max-hours', type=float, default=3.0, help='Maximum hold time in hours (default: 3.0)')
-    delta_parser.add_argument('--max-cycles', type=int, help='Maximum cycles (default: unlimited)')
+    delta_parser.add_argument('--loop', action='store_true', help='Run continuously in loop mode (default: run once)')
+    delta_parser.add_argument('--max-cycles', type=int, help='Maximum cycles in loop mode (default: unlimited)')
 
     # Close All command
     close_parser = subparsers.add_parser('close-all', help='Close all open positions (emergency stop)')
@@ -163,10 +164,42 @@ async def main():
                 capital_percentage=capital_pct,
                 usd_amount=usd_amount
             )
-            await strategy.run_loop(
-                hold_time_hours=(min_hours, max_hours),
-                max_cycles=args.max_cycles
-            )
+
+            if args.loop:
+                # Run in loop mode
+                await strategy.run_loop(
+                    hold_time_hours=(min_hours, max_hours),
+                    max_cycles=args.max_cycles
+                )
+            else:
+                # Run once: open -> wait -> close
+                import random
+                from datetime import datetime, timedelta
+
+                # Open position
+                open_result = await strategy.open_delta_neutral_position()
+
+                if not open_result['success']:
+                    print("❌ Failed to open position")
+                    sys.exit(1)
+
+                # Calculate hold time
+                hold_seconds = random.uniform(min_hours * 3600, max_hours * 3600)
+                hold_minutes = hold_seconds / 60
+                close_time = datetime.now() + timedelta(seconds=hold_seconds)
+
+                print(f"\n⏰ Position will close at: {close_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"   (holding for {hold_minutes:.1f} minutes)")
+
+                # Wait
+                await asyncio.sleep(hold_seconds)
+
+                # Close position
+                close_result = await strategy.close_delta_neutral_position()
+
+                if not close_result['success']:
+                    print("❌ Failed to close position")
+                    sys.exit(1)
 
         elif args.command == 'close-all':
             # Try to auto-detect position size if not specified

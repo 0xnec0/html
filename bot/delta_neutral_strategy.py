@@ -10,12 +10,14 @@ import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 from .trading_bot import TradingBot
+from .notifier import DiscordNotifier
 
 
 class DeltaNeutralStrategy:
     """Delta neutral strategy with automatic position rotation"""
 
     POSITION_FILE = ".current_position.json"
+    HISTORY_FILE = ".history.json"
 
     def __init__(self, bot: TradingBot, leverage: int = 10, capital_percentage: float = 0.5, usd_amount: float = None):
         """
@@ -33,6 +35,7 @@ class DeltaNeutralStrategy:
         self.usd_amount = usd_amount
         self.position_open = False
         self.current_position = None
+        self.notifier = DiscordNotifier()
 
     def _save_position_to_file(self):
         """Save current position to file for emergency close"""
@@ -49,6 +52,26 @@ class DeltaNeutralStrategy:
                 os.remove(self.POSITION_FILE)
         except Exception as e:
             print(f"⚠️  Failed to remove position file: {e}")
+
+    def _save_to_history(self, trade_data: Dict[str, Any]):
+        """Save completed trade to history file"""
+        try:
+            # Load existing history
+            history = []
+            if os.path.exists(self.HISTORY_FILE):
+                with open(self.HISTORY_FILE, 'r') as f:
+                    history = json.load(f)
+
+            # Append new trade
+            history.append(trade_data)
+
+            # Save updated history
+            with open(self.HISTORY_FILE, 'w') as f:
+                json.dump(history, f, indent=2)
+
+            print(f"📝 Trade saved to history ({len(history)} total trades)")
+        except Exception as e:
+            print(f"⚠️  Failed to save trade to history: {e}")
 
     @staticmethod
     def load_current_position() -> Optional[Dict[str, Any]]:
@@ -228,10 +251,16 @@ class DeltaNeutralStrategy:
 
             print("\n✅ Delta neutral position opened successfully!")
 
+            # Send Discord notification
+            await self.notifier.send_position_opened(self.current_position)
+
         # Handle partial failure - close the successful position
         elif paradex_success and not lighter_success:
             print("\n⚠️  Partial failure detected: Paradex succeeded but Lighter failed")
             print("🔄 Automatically closing Paradex position to maintain safety...")
+
+            # Send partial failure notification
+            await self.notifier.send_partial_failure("Paradex", position_size)
 
             try:
                 # Close Paradex position (SELL to close LONG)
@@ -240,9 +269,17 @@ class DeltaNeutralStrategy:
                     print("✅ Paradex position closed successfully")
                 else:
                     print("❌ Failed to close Paradex position - MANUAL INTERVENTION REQUIRED!")
+                    await self.notifier.send_error(
+                        "Failed to close Paradex position after partial failure",
+                        f"Lighter error: {lighter_result}"
+                    )
             except Exception as e:
                 print(f"❌ Error closing Paradex position: {e}")
                 print("⚠️  MANUAL INTERVENTION REQUIRED - Check Paradex for open position!")
+                await self.notifier.send_error(
+                    f"Error closing Paradex position: {e}",
+                    "MANUAL INTERVENTION REQUIRED"
+                )
 
             print(f"\n❌ Failed to open delta neutral position")
             print(f"   Lighter error: {lighter_result}")
@@ -251,6 +288,9 @@ class DeltaNeutralStrategy:
             print("\n⚠️  Partial failure detected: Lighter succeeded but Paradex failed")
             print("🔄 Automatically closing Lighter position to maintain safety...")
 
+            # Send partial failure notification
+            await self.notifier.send_partial_failure("Lighter", position_size)
+
             try:
                 # Close Lighter position (BUY to close SHORT)
                 close_result = await self.bot.lighter.place_market_order('BUY', position_size)
@@ -258,9 +298,17 @@ class DeltaNeutralStrategy:
                     print("✅ Lighter position closed successfully")
                 else:
                     print("❌ Failed to close Lighter position - MANUAL INTERVENTION REQUIRED!")
+                    await self.notifier.send_error(
+                        "Failed to close Lighter position after partial failure",
+                        f"Paradex error: {paradex_result}"
+                    )
             except Exception as e:
                 print(f"❌ Error closing Lighter position: {e}")
                 print("⚠️  MANUAL INTERVENTION REQUIRED - Check Lighter for open position!")
+                await self.notifier.send_error(
+                    f"Error closing Lighter position: {e}",
+                    "MANUAL INTERVENTION REQUIRED"
+                )
 
             print(f"\n❌ Failed to open delta neutral position")
             print(f"   Paradex error: {paradex_result}")
@@ -351,6 +399,25 @@ class DeltaNeutralStrategy:
             print(f"   Lighter (SHORT): ${lighter_pnl:.2f}")
             print(f"   Total P&L: ${total_pnl:.2f}")
 
+            # Save to history
+            trade_data = {
+                'entry_time': self.current_position['timestamp'],
+                'exit_time': datetime.now().isoformat(),
+                'size': position_size,
+                'paradex_entry_price': entry_paradex_price,
+                'paradex_exit_price': paradex_price if paradex_price else 0,
+                'lighter_entry_price': entry_lighter_price,
+                'lighter_exit_price': lighter_price if lighter_price else 0,
+                'paradex_pnl': paradex_pnl,
+                'lighter_pnl': lighter_pnl,
+                'total_pnl': total_pnl,
+                'fees': 0  # TODO: Add fee tracking
+            }
+            self._save_to_history(trade_data)
+
+            # Send Discord notification
+            await self.notifier.send_position_closed(trade_data)
+
             self.position_open = False
             self.current_position = None
 
@@ -390,6 +457,9 @@ class DeltaNeutralStrategy:
         else:
             print(f"   Max cycles: ∞ (infinite)")
         print("="*60)
+
+        # Send loop started notification
+        await self.notifier.send_loop_started(self.leverage, self.capital_percentage, max_cycles)
 
         cycle = 0
 
@@ -434,6 +504,7 @@ class DeltaNeutralStrategy:
                 # Check if we should stop
                 if max_cycles and cycle >= max_cycles:
                     print(f"\n✅ Completed {max_cycles} cycles. Stopping.")
+                    await self.notifier.send_loop_stopped(f"Completed {max_cycles} cycles")
                     break
 
                 # Small pause before next cycle
@@ -442,11 +513,13 @@ class DeltaNeutralStrategy:
 
         except KeyboardInterrupt:
             print("\n\n⚠️  Loop interrupted by user")
+            await self.notifier.send_loop_stopped("Interrupted by user")
             if self.position_open:
                 print("🔄 Closing open position...")
                 await self.close_delta_neutral_position()
         except Exception as e:
             print(f"\n❌ Error in loop: {e}")
+            await self.notifier.send_error(f"Loop error: {e}", "Bot stopped due to error")
             if self.position_open:
                 print("🔄 Attempting to close position...")
                 await self.close_delta_neutral_position()
