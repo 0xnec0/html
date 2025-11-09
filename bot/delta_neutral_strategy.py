@@ -37,17 +37,37 @@ class DeltaNeutralStrategy:
         """
         print("\n💰 Checking available balances...")
 
-        # TODO: Implement actual balance fetching
-        # For now, return placeholder
+        # Get balance from both exchanges
+        paradex_balance_info = await self.bot.paradex.get_account_balance()
+        lighter_balance_info = await self.bot.lighter.get_account_balance()
+
+        # Extract USDC balance (assuming USDC as collateral)
+        paradex_balance = 0.0
+        lighter_balance = 0.0
+
+        if paradex_balance_info:
+            # Extract balance from Paradex response
+            # Format depends on API response structure
+            if isinstance(paradex_balance_info, dict):
+                # Try different possible keys
+                paradex_balance = float(paradex_balance_info.get('available_balance', 0) or
+                                      paradex_balance_info.get('equity', 0) or
+                                      paradex_balance_info.get('balance', 0))
+
+        if lighter_balance_info:
+            # Extract balance from Lighter response
+            if isinstance(lighter_balance_info, dict):
+                lighter_balance = float(lighter_balance_info.get('available_balance', 0) or
+                                      lighter_balance_info.get('equity', 0) or
+                                      lighter_balance_info.get('balance', 0))
+
         balances = {
-            'paradex': 0.0,
-            'lighter': 0.0
+            'paradex': paradex_balance,
+            'lighter': lighter_balance
         }
 
-        positions = await self.bot.monitor_positions()
-
-        # Extract balances from positions response
-        # This needs to be implemented based on actual API responses
+        print(f"   Paradex: ${paradex_balance:.2f}")
+        print(f"   Lighter: ${lighter_balance:.2f}")
 
         return balances
 
@@ -102,12 +122,16 @@ class DeltaNeutralStrategy:
         # Get balances
         balances = await self.get_available_balance()
 
-        # For now, use a test amount
-        # TODO: Replace with actual balance-based calculation
-        # position_size = await self.calculate_position_size(avg_price, min(balances['paradex'], balances['lighter']))
+        # Calculate position size based on available balance
+        # Use the smaller balance to ensure both sides can be filled
+        available_balance = min(balances['paradex'], balances['lighter'])
 
-        # Test with small amount
-        position_size = 1.0  # Start with 1 unit for testing
+        if available_balance <= 0:
+            print("❌ No available balance detected")
+            print("⚠️  Falling back to test mode with 1.0 unit")
+            position_size = 1.0
+        else:
+            position_size = await self.calculate_position_size(avg_price, available_balance)
 
         print(f"\n📊 Executing delta neutral strategy...")
         print(f"   Paradex: BUY {position_size} @ ${paradex_price:.4f}")
