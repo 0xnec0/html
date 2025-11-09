@@ -14,8 +14,10 @@
 ✨ **同時実行** - 両取引所で同じタイミングで注文を発注
 📊 **価格監視** - 両取引所のリアルタイム価格取得
 💹 **アービトラージ検出** - 価格差を自動検出
+💰 **デルタニュートラル戦略** - ヘッジポジションで安定収益を狙う
 🔄 **非同期処理** - asyncioによる高速実行
 ⚙️ **柔軟な設定** - 環境変数またはJSONファイルで設定
+🤖 **自動ループ** - ポジションの自動ローテーション
 
 ## インストール
 
@@ -226,6 +228,62 @@ python main.py autoloop BUY 0.05 --min-hours 2.5 --max-hours 4.0 --max-iteration
 
 **Ctrl+C**で安全に停止できます。
 
+### 💰 デルタニュートラル戦略（NEW!）
+
+**Paradexでロング（買い）+ Lighterでショート（売り）** を同時に持つことで、価格変動リスクを相殺しながらファンディングレートで利益を狙う戦略です。
+
+```bash
+# 基本的な使い方（.envの設定を使用）
+python main.py delta-neutral
+
+# USD金額を指定（50ドル分のポジション）
+python main.py delta-neutral --usd-amount 50
+
+# ホールド時間をカスタマイズ（3-6分でテスト）
+python main.py delta-neutral --usd-amount 50 --min-hours 0.05 --max-hours 0.1
+
+# 最大サイクル数を指定（5回で停止）
+python main.py delta-neutral --usd-amount 100 --max-cycles 5
+
+# 完全なカスタマイズ例
+python main.py delta-neutral \
+  --usd-amount 50 \
+  --leverage 10 \
+  --min-hours 2.0 \
+  --max-hours 3.0 \
+  --max-cycles 10
+```
+
+**動作：**
+1. Paradexでロング（BUY）+ Lighterでショート（SELL）を同時オープン
+2. ランダムな時間（2-3時間デフォルト）待機
+3. 両ポジションをクローズ（Paradex SELL + Lighter BUY）
+4. 30秒待機して1に戻る
+
+**.envで設定（推奨）:**
+```bash
+# デルタニュートラル戦略設定
+DELTA_NEUTRAL_USD_AMOUNT=50      # 1ポジションあたりのUSD金額
+DELTA_NEUTRAL_LEVERAGE=10        # レバレッジ倍率
+DELTA_NEUTRAL_CAPITAL_PCT=0.5    # 証拠金の使用率（50%）
+DELTA_NEUTRAL_MIN_HOURS=2.0      # 最小保持時間
+DELTA_NEUTRAL_MAX_HOURS=3.0      # 最大保持時間
+```
+
+**メリット：**
+- ✅ 価格変動リスクがほぼゼロ（ヘッジ済み）
+- ✅ ファンディングレートで安定収益
+- ✅ 自動的にポジションローテーション
+- ✅ 両取引所で同じUSD金額のポジション
+
+**リスク：**
+- ⚠️ 極端な価格変動時の清算リスク
+- ⚠️ ファンディングレートが逆転する可能性
+- ⚠️ スプレッドコスト
+- ⚠️ 両取引所の同時接続が必要
+
+**Ctrl+C**で安全に停止できます。
+
 ## 設定ファイルを使用
 
 ```bash
@@ -237,12 +295,13 @@ python main.py --config config.json trade BUY 0.1
 
 ```
 bot/
-├── __init__.py          # パッケージ初期化
-├── config.py            # 設定管理
-├── paradex_client.py    # Paradex接続クライアント
-├── lighter_client.py    # Lighter接続クライアント
-├── trading_bot.py       # メイン取引ロジック
-└── auto_trader.py       # 自動取引ループ
+├── __init__.py               # パッケージ初期化
+├── config.py                 # 設定管理
+├── paradex_client.py         # Paradex接続クライアント
+├── lighter_client.py         # Lighter接続クライアント
+├── trading_bot.py            # メイン取引ロジック
+├── auto_trader.py            # 自動取引ループ
+└── delta_neutral_strategy.py # デルタニュートラル戦略
 
 main.py                  # エントリーポイント
 requirements.txt         # Python依存関係
@@ -285,6 +344,17 @@ config.example.json      # 設定例
 - ✅ 安全な停止機能（Ctrl+C）
 - ✅ 進捗表示とログ出力
 - ✅ カスタマイズ可能な繰り返し回数
+
+### DeltaNeutralStrategy（デルタニュートラル戦略）
+
+- ✅ 両取引所で同時ヘッジポジション（Paradex LONG + Lighter SHORT）
+- ✅ USD金額指定でポジションサイズ自動計算
+- ✅ 両取引所で均等なUSD金額のポジション
+- ✅ レバレッジ対応（デフォルト10x）
+- ✅ 自動的なポジションローテーション
+- ✅ P&L（損益）計算と表示
+- ✅ 安全な停止機能（Ctrl+C）
+- ✅ .envファイルで設定可能
 
 ## セキュリティ
 
