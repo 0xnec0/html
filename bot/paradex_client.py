@@ -221,23 +221,42 @@ class ParadexClient:
             Order result or None if error
         """
         try:
-            # Get current market price for limit price calculation
-            current_price = await self.get_market_price()
-            if not current_price:
-                raise ValueError("Could not fetch current market price")
+            # Get market data to fetch bid/ask prices
+            if self.client:
+                summary = self.client.api_client.fetch_markets_summary({"market": self.market})
+            else:
+                summary = await self._make_request("GET", f"/markets/summary?market={self.market}")
 
-            # Set aggressive limit price to ensure fill
-            # Use 0.5% slippage tolerance for IOC orders to avoid EXCEEDS_MAX_SLIPPAGE
-            slippage_multiplier = 1.005 if side.upper() == 'BUY' else 0.995
-            limit_price = current_price * slippage_multiplier
+            if not summary:
+                raise ValueError("Could not fetch market data")
+
+            # Find market and extract bid/ask
+            results = summary.get('results', []) if isinstance(summary, dict) else summary
+            bid = None
+            ask = None
+
+            for market_data in results:
+                if market_data.get('symbol') == self.market:
+                    bid = float(market_data.get('bid', 0))
+                    ask = float(market_data.get('ask', 0))
+                    break
+
+            if not bid or not ask:
+                raise ValueError("Could not fetch bid/ask prices")
+
+            # Use bid/ask directly to avoid slippage issues
+            # BUY: use ask price (best offer)
+            # SELL: use bid price (best bid)
+            if side.upper() == 'BUY':
+                limit_price = ask
+            else:
+                limit_price = bid
+
+            print(f"ℹ️  Using orderbook price: BID=${bid:.4f} ASK=${ask:.4f}")
+            print(f"   Order: {side} at ${limit_price:.4f}")
 
             # Round to 0.0001 (tick size for Paradex)
-            # BUY: round up to ensure fill
-            # SELL: round down to ensure fill
-            if side.upper() == 'BUY':
-                limit_price = math.ceil(limit_price * 10000) / 10000
-            else:
-                limit_price = math.floor(limit_price * 10000) / 10000
+            limit_price = round(limit_price, 4)
 
             # Try SDK first
             if self.client and PARADEX_SDK_AVAILABLE:
@@ -253,12 +272,8 @@ class ParadexClient:
                     limit_price=Decimal(str(limit_price)),
                     instruction="IOC"  # Immediate or Cancel
                 )
-                # Try to submit with max_slippage parameter
-                try:
-                    result = self.client.api_client.submit_order(order=order, max_slippage="auto")
-                except TypeError:
-                    # If max_slippage not supported, submit without it
-                    result = self.client.api_client.submit_order(order=order)
+                # Submit order (no max_slippage needed when using bid/ask prices)
+                result = self.client.api_client.submit_order(order=order)
             else:
                 # Ensure size is an integer (Paradex requires whole units)
                 size_int = int(size)
@@ -270,8 +285,7 @@ class ParadexClient:
                     'type': 'LIMIT',
                     'size': str(size_int),
                     'limit_price': str(limit_price),
-                    'time_in_force': 'IOC',  # Immediate or Cancel
-                    'max_slippage': 'auto'  # Auto slippage tolerance
+                    'time_in_force': 'IOC'  # Immediate or Cancel
                 }
                 result = await self._make_request("POST", "/orders", order_params, signed=True)
 
