@@ -1138,14 +1138,19 @@ class LighterClient:
                 positions = account.get('positions', []) or account.get('perp_positions', [])
                 if positions:
                     for pos in positions:
-                        size = abs(float(pos.get('size', 0) or pos.get('amount', 0)))
-                        if size > 0:
-                            # Position detected - check if it changed
-                            if self._initial_position_size is not None:
-                                if size > self._initial_position_size:
-                                    print(f"\n✅ WS: Position change detected! {self._initial_position_size} → {size}")
-                                    self._position_event.set()  # Signal position change
-                            break
+                        # Handle pos as both dict and string
+                        if isinstance(pos, str):
+                            pos = json.loads(pos)
+
+                        if isinstance(pos, dict):
+                            size = abs(float(pos.get('size', 0) or pos.get('amount', 0)))
+                            if size > 0:
+                                # Position detected - check if it changed
+                                if self._initial_position_size is not None:
+                                    if size > self._initial_position_size:
+                                        print(f"\n✅ WS: Position change detected! {self._initial_position_size} → {size}")
+                                        self._position_event.set()  # Signal position change
+                                break
         except Exception as e:
             print(f"\n⚠️  WebSocket account error: {e} | Type: {type(account)}")
 
