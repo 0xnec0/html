@@ -984,12 +984,13 @@ class DeltaNeutralStrategy:
                 print("\n⏸️  Waiting 30 seconds before next cycle...")
                 await asyncio.sleep(30)
 
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, asyncio.CancelledError):
             print("\n\n⚠️  Loop interrupted by user")
             await self.notifier.send_loop_stopped("Interrupted by user")
             if self.position_open:
                 print("🔄 Closing open position...")
                 await self.close_delta_neutral_position()
+            raise  # Re-raise to propagate to outer handler
         except Exception as e:
             print(f"\n❌ Error in loop: {e}")
             await self.notifier.send_error(f"Loop error: {e}", "Bot stopped due to error")

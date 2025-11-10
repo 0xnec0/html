@@ -204,10 +204,15 @@ async def main():
                     raise KeyboardInterrupt
             else:
                 # Run in loop mode (default)
-                await strategy.run_loop(
-                    hold_time_hours=(min_hours, max_hours),
-                    max_cycles=args.max_cycles
-                )
+                try:
+                    await strategy.run_loop(
+                        hold_time_hours=(min_hours, max_hours),
+                        max_cycles=args.max_cycles
+                    )
+                except (KeyboardInterrupt, asyncio.CancelledError):
+                    # run_loop already handles position closing
+                    # Just re-raise to reach outer exception handler
+                    raise
 
         elif args.command == 'close-all':
             # Try to auto-detect position size if not specified
@@ -275,16 +280,19 @@ async def main():
 
     except KeyboardInterrupt:
         print("\n\n⚠️  Interrupted by user")
-        sys.exit(0)
+        # Don't exit here - let finally block run
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
     finally:
         # Clean up client sessions
         if 'bot' in locals():
-            await bot.close()
+            try:
+                await bot.close()
+                print("✓ Sessions closed")
+            except Exception as e:
+                print(f"⚠️  Error closing sessions: {e}")
 
     print("\n✅ Done")
 
