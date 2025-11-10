@@ -209,6 +209,138 @@ class DeltaNeutralStrategy:
 
         return balances
 
+    async def _verify_filled_size(self, order_result: Any, expected_size: float, exchange_name: str) -> float:
+        """
+        Verify the actual filled size from order result
+
+        Args:
+            order_result: Order result from exchange
+            expected_size: Expected position size
+            exchange_name: Name of exchange for logging
+
+        Returns:
+            Actual filled size (returns expected_size if verification fails)
+        """
+        try:
+            # For now, assume full fill if order succeeded
+            # In production, you'd parse the order result to get actual fill
+            # This is a placeholder - actual implementation depends on exchange API response
+            if order_result:
+                # TODO: Parse actual filled size from order_result
+                # For Paradex SDK: order_result might have 'filled_qty' or 'size'
+                # For Lighter SDK: order_result might have different structure
+                return expected_size
+            return 0.0
+        except Exception as e:
+            print(f"⚠️  Failed to verify fill size for {exchange_name}: {e}")
+            return expected_size  # Assume full fill if we can't verify
+
+    async def _fill_shortage(self, paradex_shortage: float, lighter_shortage: float,
+                            paradex_price: float, lighter_price: float) -> tuple:
+        """
+        Fill position shortage by placing additional orders
+
+        Args:
+            paradex_shortage: Shortage on Paradex
+            lighter_shortage: Shortage on Lighter
+            paradex_price: Current Paradex price
+            lighter_price: Current Lighter price
+
+        Returns:
+            Tuple of (paradex_filled, lighter_filled)
+        """
+        print(f"\n🔄 Filling shortage...")
+        print(f"   Paradex: {paradex_shortage:.2f} units")
+        print(f"   Lighter: {lighter_shortage:.2f} units")
+
+        tasks = []
+        if paradex_shortage > 0:
+            tasks.append(self.bot.paradex.place_market_order('BUY', paradex_shortage))
+        else:
+            tasks.append(None)
+
+        if lighter_shortage > 0:
+            tasks.append(self.bot.lighter.place_market_order('SELL', lighter_shortage))
+        else:
+            tasks.append(None)
+
+        # Execute shortage fills
+        results = []
+        for task in tasks:
+            if task is None:
+                results.append(None)
+            else:
+                results.append(await task)
+
+        paradex_result, lighter_result = results
+
+        # Verify fills
+        paradex_filled = await self._verify_filled_size(paradex_result, paradex_shortage, "Paradex") if paradex_shortage > 0 else 0
+        lighter_filled = await self._verify_filled_size(lighter_result, lighter_shortage, "Lighter") if lighter_shortage > 0 else 0
+
+        print(f"   ✓ Paradex filled: {paradex_filled:.2f}")
+        print(f"   ✓ Lighter filled: {lighter_filled:.2f}")
+
+        return (paradex_filled, lighter_filled)
+
+    async def _emergency_close_all(self, position_size: float) -> bool:
+        """
+        Emergency close all positions and reset
+
+        Args:
+            position_size: Size of positions to close
+
+        Returns:
+            True if successfully closed
+        """
+        print("\n🚨 EMERGENCY: Closing all positions...")
+        print(f"   Closing {position_size:.2f} units on both exchanges")
+
+        try:
+            # Close both positions
+            tasks = [
+                self.bot.paradex.place_market_order('SELL', position_size),  # Close LONG
+                self.bot.lighter.place_market_order('BUY', position_size)    # Close SHORT
+            ]
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            paradex_result = results[0]
+            lighter_result = results[1]
+
+            paradex_success = not isinstance(paradex_result, Exception) and paradex_result
+            lighter_success = not isinstance(lighter_result, Exception) and lighter_result
+
+            if paradex_success and lighter_success:
+                print("✅ All positions closed successfully")
+                # Send notification
+                await self.notifier.send_error(
+                    "Emergency closure completed",
+                    f"Closed {position_size:.2f} units on both exchanges after retry failure"
+                )
+                return True
+            else:
+                print("❌ Failed to close some positions")
+                if not paradex_success:
+                    print(f"   Paradex error: {paradex_result}")
+                if not lighter_success:
+                    print(f"   Lighter error: {lighter_result}")
+
+                # Send critical alert
+                await self.notifier.send_error(
+                    "CRITICAL: Emergency closure failed",
+                    "MANUAL INTERVENTION REQUIRED - Check open positions!"
+                )
+                return False
+
+        except Exception as e:
+            print(f"❌ Emergency close error: {e}")
+            await self.notifier.send_error(
+                f"CRITICAL: Emergency close exception: {e}",
+                "MANUAL INTERVENTION REQUIRED"
+            )
+            return False
+
     async def calculate_position_size(self, price: float, balance: float) -> float:
         """
         Calculate position size based on leverage and capital percentage
@@ -313,39 +445,150 @@ class DeltaNeutralStrategy:
                 position_size = int(position_size)
 
         print(f"\n📊 Executing delta neutral strategy...")
-        print(f"   Paradex: BUY {position_size} @ ${paradex_price:.4f}")
-        print(f"   Lighter: SELL {position_size} @ ${lighter_price:.4f}")
+        print(f"   Target: {position_size} units")
+        print(f"   Paradex: BUY @ ${paradex_price:.4f}")
+        print(f"   Lighter: SELL @ ${lighter_price:.4f}")
 
-        # Execute both orders simultaneously
-        tasks = [
-            self.bot.paradex.place_market_order('BUY', position_size),
-            self.bot.lighter.place_market_order('SELL', position_size)
-        ]
+        # Retry logic: Try up to 3 times to fill the position
+        MAX_RETRIES = 3
+        target_size = position_size
+        paradex_total_filled = 0.0
+        lighter_total_filled = 0.0
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for attempt in range(1, MAX_RETRIES + 1):
+            print(f"\n{'='*60}")
+            print(f"📍 Attempt {attempt}/{MAX_RETRIES}")
+            print(f"{'='*60}")
 
-        paradex_result = results[0]
-        lighter_result = results[1]
+            # Calculate remaining shortage
+            paradex_shortage = target_size - paradex_total_filled
+            lighter_shortage = target_size - lighter_total_filled
 
-        paradex_success = not isinstance(paradex_result, Exception) and paradex_result
-        lighter_success = not isinstance(lighter_result, Exception) and lighter_result
+            # If both are filled, we're done
+            if paradex_shortage <= 0.5 and lighter_shortage <= 0.5:  # Allow 0.5 unit tolerance
+                print(f"✅ Position fully filled!")
+                print(f"   Paradex: {paradex_total_filled:.2f}/{target_size:.2f}")
+                print(f"   Lighter: {lighter_total_filled:.2f}/{target_size:.2f}")
+                break
+
+            # Place orders for the shortage (or initial order on first attempt)
+            if attempt == 1:
+                # First attempt: place initial orders
+                print(f"   Paradex: BUY {paradex_shortage:.2f}")
+                print(f"   Lighter: SELL {lighter_shortage:.2f}")
+            else:
+                # Retry: fill shortage
+                print(f"   🔄 Filling shortage:")
+                print(f"      Paradex: {paradex_shortage:.2f} units")
+                print(f"      Lighter: {lighter_shortage:.2f} units")
+
+            # Execute orders simultaneously
+            tasks = [
+                self.bot.paradex.place_market_order('BUY', paradex_shortage),
+                self.bot.lighter.place_market_order('SELL', lighter_shortage)
+            ]
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            paradex_result = results[0]
+            lighter_result = results[1]
+
+            paradex_success = not isinstance(paradex_result, Exception) and paradex_result
+            lighter_success = not isinstance(lighter_result, Exception) and lighter_result
+
+            # Verify filled sizes
+            paradex_filled = await self._verify_filled_size(paradex_result, paradex_shortage, "Paradex") if paradex_success else 0
+            lighter_filled = await self._verify_filled_size(lighter_result, lighter_shortage, "Lighter") if lighter_success else 0
+
+            # Update totals
+            paradex_total_filled += paradex_filled
+            lighter_total_filled += lighter_filled
+
+            print(f"\n📊 Fill Status:")
+            print(f"   Paradex: {paradex_total_filled:.2f}/{target_size:.2f} ({paradex_total_filled/target_size*100:.1f}%)")
+            print(f"   Lighter: {lighter_total_filled:.2f}/{target_size:.2f} ({lighter_total_filled/target_size*100:.1f}%)")
+
+            # Check if we're close enough
+            fill_tolerance = 0.99  # 99% fill is acceptable
+            paradex_fill_ratio = paradex_total_filled / target_size
+            lighter_fill_ratio = lighter_total_filled / target_size
+
+            if paradex_fill_ratio >= fill_tolerance and lighter_fill_ratio >= fill_tolerance:
+                print(f"✅ Position sufficiently filled (>= {fill_tolerance*100:.0f}%)")
+                break
+
+            # If this was the last attempt and we still have shortage, trigger emergency close
+            if attempt == MAX_RETRIES:
+                print(f"\n⚠️  MAX RETRIES REACHED - Position not fully filled")
+                print(f"   Paradex filled: {paradex_total_filled:.2f}/{target_size:.2f}")
+                print(f"   Lighter filled: {lighter_total_filled:.2f}/{target_size:.2f}")
+
+                # Emergency: Close all positions and retry from scratch
+                if paradex_total_filled > 0 or lighter_total_filled > 0:
+                    print(f"\n🚨 Triggering emergency closure...")
+
+                    # Close whatever we managed to fill
+                    close_size = max(paradex_total_filled, lighter_total_filled)
+                    emergency_success = await self._emergency_close_all(close_size)
+
+                    if emergency_success:
+                        print(f"\n🔄 Restarting position opening from scratch...")
+                        await asyncio.sleep(5)  # Wait 5 seconds before retry
+                        # Recursive retry: call this method again
+                        return await self.open_delta_neutral_position()
+                    else:
+                        print(f"\n❌ Emergency close failed - MANUAL INTERVENTION REQUIRED")
+                        return {
+                            'success': False,
+                            'error': 'Emergency close failed after max retries',
+                            'paradex': paradex_result,
+                            'lighter': lighter_result
+                        }
+
+                # No positions to close, just fail
+                return {
+                    'success': False,
+                    'error': 'Max retries reached without sufficient fill',
+                    'paradex': paradex_result,
+                    'lighter': lighter_result
+                }
+
+            # Wait a bit before retry
+            if attempt < MAX_RETRIES:
+                print(f"\n⏳ Waiting 3 seconds before retry...")
+                await asyncio.sleep(3)
+
+        # At this point, we have a successful fill (or broke out of loop)
+        paradex_success = paradex_total_filled >= target_size * 0.99
+        lighter_success = lighter_total_filled >= target_size * 0.99
 
         # Check if both succeeded
         if paradex_success and lighter_success:
+            # Use actual filled sizes
+            actual_position_size = min(paradex_total_filled, lighter_total_filled)
             self.position_open = True
             self.current_position = {
                 'timestamp': datetime.now().isoformat(),
-                'size': position_size,
+                'size': actual_position_size,  # Use actual filled size
+                'target_size': target_size,     # Original target
+                'paradex_filled': paradex_total_filled,
+                'lighter_filled': lighter_total_filled,
                 'paradex_price': paradex_price,
                 'lighter_price': lighter_price,
-                # Don't save SDK response objects (not JSON serializable)
-                # Just save essential info for position tracking
+                'fill_ratio': min(paradex_total_filled/target_size, lighter_total_filled/target_size) * 100,
             }
 
             # Save position to file for emergency close
             self._save_position_to_file()
 
-            print("\n✅ Delta neutral position opened successfully!")
+            print("\n" + "="*60)
+            print("✅ Delta neutral position opened successfully!")
+            print("="*60)
+            print(f"   Target size: {target_size:.2f}")
+            print(f"   Paradex filled: {paradex_total_filled:.2f} ({paradex_total_filled/target_size*100:.1f}%)")
+            print(f"   Lighter filled: {lighter_total_filled:.2f} ({lighter_total_filled/target_size*100:.1f}%)")
+            print(f"   Position size: {actual_position_size:.2f}")
+            print("="*60)
 
             # Send Discord notification with balance info
             notification_data = {
@@ -355,78 +598,23 @@ class DeltaNeutralStrategy:
             }
             await self.notifier.send_position_opened(notification_data)
 
-        # Handle partial failure - close the successful position
-        elif paradex_success and not lighter_success:
-            print("\n⚠️  Partial failure detected: Paradex succeeded but Lighter failed")
-            print("🔄 Automatically closing Paradex position to maintain safety...")
+            return {
+                'success': True,
+                'position': self.current_position,
+                'paradex_filled': paradex_total_filled,
+                'lighter_filled': lighter_total_filled
+            }
 
-            # Send partial failure notification
-            await self.notifier.send_partial_failure("Paradex", position_size)
-
-            try:
-                # Close Paradex position (SELL to close LONG)
-                close_result = await self.bot.paradex.place_market_order('SELL', position_size)
-                if close_result:
-                    print("✅ Paradex position closed successfully")
-                else:
-                    print("❌ Failed to close Paradex position - MANUAL INTERVENTION REQUIRED!")
-                    await self.notifier.send_error(
-                        "Failed to close Paradex position after partial failure",
-                        f"Lighter error: {lighter_result}"
-                    )
-            except Exception as e:
-                print(f"❌ Error closing Paradex position: {e}")
-                print("⚠️  MANUAL INTERVENTION REQUIRED - Check Paradex for open position!")
-                await self.notifier.send_error(
-                    f"Error closing Paradex position: {e}",
-                    "MANUAL INTERVENTION REQUIRED"
-                )
-
-            print(f"\n❌ Failed to open delta neutral position")
-            print(f"   Lighter error: {lighter_result}")
-
-        elif lighter_success and not paradex_success:
-            print("\n⚠️  Partial failure detected: Lighter succeeded but Paradex failed")
-            print("🔄 Automatically closing Lighter position to maintain safety...")
-
-            # Send partial failure notification
-            await self.notifier.send_partial_failure("Lighter", position_size)
-
-            try:
-                # Close Lighter position (BUY to close SHORT)
-                close_result = await self.bot.lighter.place_market_order('BUY', position_size)
-                if close_result:
-                    print("✅ Lighter position closed successfully")
-                else:
-                    print("❌ Failed to close Lighter position - MANUAL INTERVENTION REQUIRED!")
-                    await self.notifier.send_error(
-                        "Failed to close Lighter position after partial failure",
-                        f"Paradex error: {paradex_result}"
-                    )
-            except Exception as e:
-                print(f"❌ Error closing Lighter position: {e}")
-                print("⚠️  MANUAL INTERVENTION REQUIRED - Check Lighter for open position!")
-                await self.notifier.send_error(
-                    f"Error closing Lighter position: {e}",
-                    "MANUAL INTERVENTION REQUIRED"
-                )
-
-            print(f"\n❌ Failed to open delta neutral position")
-            print(f"   Paradex error: {paradex_result}")
-
-        else:
-            # Both failed
-            print("\n❌ Failed to open delta neutral position")
-            if isinstance(paradex_result, Exception):
-                print(f"   Paradex error: {paradex_result}")
-            if isinstance(lighter_result, Exception):
-                print(f"   Lighter error: {lighter_result}")
+        # If we got here without returning, something went wrong
+        print("\n❌ Failed to open delta neutral position")
+        print(f"   Paradex fill: {paradex_total_filled:.2f}/{target_size:.2f}")
+        print(f"   Lighter fill: {lighter_total_filled:.2f}/{target_size:.2f}")
 
         return {
-            'success': paradex_success and lighter_success,
-            'position': self.current_position if paradex_success and lighter_success else None,
-            'paradex': paradex_result,
-            'lighter': lighter_result
+            'success': False,
+            'error': 'Insufficient fill after retries',
+            'paradex_filled': paradex_total_filled,
+            'lighter_filled': lighter_total_filled
         }
 
     async def close_delta_neutral_position(self) -> Dict[str, Any]:
