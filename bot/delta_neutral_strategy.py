@@ -497,21 +497,23 @@ class DeltaNeutralStrategy:
 
         # Calculate position size
         if self.usd_amount:
-            # Calculate position size for each exchange to match USD amount as closely as possible
-            paradex_size = int(self.usd_amount / paradex_price)
-            lighter_size = int(self.usd_amount / lighter_price)
+            # Calculate INDEPENDENT position size for each exchange to match USD amount
+            # This ensures each exchange gets as close to the target USD amount as possible
+            paradex_target_size = int(self.usd_amount / paradex_price)
+            lighter_target_size = int(self.usd_amount / lighter_price)
 
-            # Use the smaller size to ensure both can be filled with similar USD amounts
-            position_size = min(paradex_size, lighter_size)
-
-            # Calculate actual USD amounts
-            paradex_usd = position_size * paradex_price
-            lighter_usd = position_size * lighter_price
+            # Calculate actual USD amounts with independent sizes
+            paradex_usd = paradex_target_size * paradex_price
+            lighter_usd = lighter_target_size * lighter_price
 
             print(f"\n💵 Using fixed USD amount: ${self.usd_amount:.2f}")
-            print(f"   Paradex price: ${paradex_price:.4f} → {position_size} units = ${paradex_usd:.2f}")
-            print(f"   Lighter price: ${lighter_price:.4f} → {position_size} units = ${lighter_usd:.2f}")
-            print(f"   Position size: {position_size} units")
+            print(f"   Paradex: {paradex_target_size} units @ ${paradex_price:.4f} = ${paradex_usd:.2f}")
+            print(f"   Lighter: {lighter_target_size} units @ ${lighter_price:.4f} = ${lighter_usd:.2f}")
+
+            # Use independent sizes for more accurate USD matching
+            paradex_position_size = paradex_target_size
+            lighter_position_size = lighter_target_size
+            position_size = paradex_target_size  # For display purposes
         else:
             # Get balances
             balances = await self.get_available_balance()
@@ -524,16 +526,20 @@ class DeltaNeutralStrategy:
                 print("❌ No available balance detected")
                 print("⚠️  Falling back to test mode with 1.0 unit")
                 position_size = 1.0
+                paradex_position_size = position_size
+                lighter_position_size = position_size
             else:
                 position_size = await self.calculate_position_size(avg_price, available_balance)
                 # Round down to integer
                 position_size = int(position_size)
+                # Use same size for both when balance-based
+                paradex_position_size = position_size
+                lighter_position_size = position_size
 
         print(f"\n📊 Executing delta neutral strategy (NEW FLOW)")
-        print(f"   Target: {position_size} units")
         print(f"   Strategy: Lighter指値 → Paradex成り行き")
-        print(f"   Paradex: BUY @ ${paradex_price:.4f}")
-        print(f"   Lighter: SELL @ ${lighter_price:.4f}")
+        print(f"   Paradex target: {paradex_position_size} units @ ${paradex_price:.4f}")
+        print(f"   Lighter target: {lighter_position_size} units @ ${lighter_price:.4f}")
 
         # Step 1: Place Lighter limit order with price updates
         print(f"\n{'='*60}")
@@ -541,7 +547,7 @@ class DeltaNeutralStrategy:
         print(f"{'='*60}")
 
         lighter_result = await self._place_lighter_limit_with_price_update(
-            size=position_size,
+            size=lighter_position_size,
             max_attempts=12,
             wait_seconds=5
         )
@@ -553,20 +559,22 @@ class DeltaNeutralStrategy:
                 'error': 'Lighter limit order failed after max attempts'
             }
 
-        lighter_filled_size = lighter_result.get('filled_size', position_size)
+        lighter_filled_size = lighter_result.get('filled_size', lighter_position_size)
         lighter_filled_price = lighter_result.get('filled_price', lighter_price)
 
         print(f"\n✅ Lighter約定完了!")
+        print(f"   目標: {lighter_position_size:.2f}")
         print(f"   約定サイズ: {lighter_filled_size:.2f}")
         print(f"   約定価格: ${lighter_filled_price:.4f}")
+        print(f"   約定USD: ${lighter_filled_size * lighter_filled_price:.2f}")
 
         # Step 2: Place Paradex market order
         print(f"\n{'='*60}")
         print(f"STEP 2: Paradex成り行き注文")
         print(f"{'='*60}")
-        print(f"   BUY {position_size} @ market")
+        print(f"   BUY {paradex_position_size} @ market")
 
-        paradex_result = await self.bot.paradex.place_market_order('BUY', position_size)
+        paradex_result = await self.bot.paradex.place_market_order('BUY', paradex_position_size)
 
         if not paradex_result or isinstance(paradex_result, Exception):
             print(f"\n⚠️  Paradex注文失敗 - Lighterポジションをクローズ中...")
@@ -590,32 +598,35 @@ class DeltaNeutralStrategy:
                 'lighter_closed': close_result
             }
 
-        paradex_filled_size = await self._verify_filled_size(paradex_result, position_size, "Paradex")
+        paradex_filled_size = await self._verify_filled_size(paradex_result, paradex_position_size, "Paradex")
 
         print(f"\n✅ Paradex約定完了!")
+        print(f"   目標: {paradex_position_size:.2f}")
         print(f"   約定サイズ: {paradex_filled_size:.2f}")
+        print(f"   約定USD: ${paradex_filled_size * paradex_price:.2f}")
 
         # Step 3: Check for size mismatch and apply hybrid adjustment if needed
         print(f"\n{'='*60}")
         print(f"STEP 3: ポジションサイズ確認")
         print(f"{'='*60}")
-        print(f"   Paradex: {paradex_filled_size:.2f}")
-        print(f"   Lighter: {lighter_filled_size:.2f}")
-        print(f"   誤差: {abs(paradex_filled_size - lighter_filled_size):.2f}")
+        print(f"   Paradex: {paradex_filled_size:.2f} / {paradex_position_size:.2f} (目標)")
+        print(f"   Lighter: {lighter_filled_size:.2f} / {lighter_position_size:.2f} (目標)")
+        print(f"   Paradex誤差: {abs(paradex_filled_size - paradex_position_size):.2f}")
+        print(f"   Lighter誤差: {abs(lighter_filled_size - lighter_position_size):.2f}")
 
-        target_size = position_size
         paradex_total_filled = paradex_filled_size
         lighter_total_filled = lighter_filled_size
 
         # Check if adjustment is needed (tolerance: 0.5 units or 1%)
-        shortage_tolerance = max(0.5, target_size * 0.01)
-        paradex_shortage = target_size - paradex_total_filled
-        lighter_shortage = target_size - lighter_total_filled
+        paradex_shortage_tolerance = max(0.5, paradex_position_size * 0.01)
+        lighter_shortage_tolerance = max(0.5, lighter_position_size * 0.01)
+        paradex_shortage = paradex_position_size - paradex_total_filled
+        lighter_shortage = lighter_position_size - lighter_total_filled
 
-        if abs(paradex_shortage) > shortage_tolerance or abs(lighter_shortage) > shortage_tolerance:
+        if abs(paradex_shortage) > paradex_shortage_tolerance or abs(lighter_shortage) > lighter_shortage_tolerance:
             print(f"\n⚠️  ポジション調整が必要")
-            print(f"   Paradex不足: {paradex_shortage:.2f}")
-            print(f"   Lighter不足: {lighter_shortage:.2f}")
+            print(f"   Paradex不足: {paradex_shortage:.2f} (許容誤差: {paradex_shortage_tolerance:.2f})")
+            print(f"   Lighter不足: {lighter_shortage:.2f} (許容誤差: {lighter_shortage_tolerance:.2f})")
 
             # Apply hybrid retry logic for adjustment
             MAX_RETRIES = 3
@@ -626,14 +637,14 @@ class DeltaNeutralStrategy:
                 print(f"{'='*60}")
 
                 # Calculate remaining shortage
-                paradex_shortage = target_size - paradex_total_filled
-                lighter_shortage = target_size - lighter_total_filled
+                paradex_shortage = paradex_position_size - paradex_total_filled
+                lighter_shortage = lighter_position_size - lighter_total_filled
 
                 # If both are filled, we're done
-                if paradex_shortage <= 0.5 and lighter_shortage <= 0.5:  # Allow 0.5 unit tolerance
+                if abs(paradex_shortage) <= paradex_shortage_tolerance and abs(lighter_shortage) <= lighter_shortage_tolerance:
                     print(f"✅ Position fully filled!")
-                    print(f"   Paradex: {paradex_total_filled:.2f}/{target_size:.2f}")
-                    print(f"   Lighter: {lighter_total_filled:.2f}/{target_size:.2f}")
+                    print(f"   Paradex: {paradex_total_filled:.2f}/{paradex_position_size:.2f}")
+                    print(f"   Lighter: {lighter_total_filled:.2f}/{lighter_position_size:.2f}")
                     break
 
                 # Execute shortage fill orders
@@ -662,13 +673,13 @@ class DeltaNeutralStrategy:
                             lighter_total_filled += filled
 
                 print(f"\n📊 Adjusted Fill Status:")
-                print(f"   Paradex: {paradex_total_filled:.2f}/{target_size:.2f} ({paradex_total_filled/target_size*100:.1f}%)")
-                print(f"   Lighter: {lighter_total_filled:.2f}/{target_size:.2f} ({lighter_total_filled/target_size*100:.1f}%)")
+                print(f"   Paradex: {paradex_total_filled:.2f}/{paradex_position_size:.2f} ({paradex_total_filled/paradex_position_size*100:.1f}%)")
+                print(f"   Lighter: {lighter_total_filled:.2f}/{lighter_position_size:.2f} ({lighter_total_filled/lighter_position_size*100:.1f}%)")
 
                 # Check if we're close enough
                 fill_tolerance = 0.99  # 99% fill is acceptable
-                paradex_fill_ratio = paradex_total_filled / target_size
-                lighter_fill_ratio = lighter_total_filled / target_size
+                paradex_fill_ratio = paradex_total_filled / paradex_position_size
+                lighter_fill_ratio = lighter_total_filled / lighter_position_size
 
                 if paradex_fill_ratio >= fill_tolerance and lighter_fill_ratio >= fill_tolerance:
                     print(f"✅ Position sufficiently filled (>= {fill_tolerance*100:.0f}%)")
@@ -677,8 +688,8 @@ class DeltaNeutralStrategy:
                 # If this was the last attempt and we still have shortage, trigger emergency close
                 if attempt == MAX_RETRIES:
                     print(f"\n⚠️  MAX RETRIES REACHED - Position not fully filled")
-                    print(f"   Paradex filled: {paradex_total_filled:.2f}/{target_size:.2f}")
-                    print(f"   Lighter filled: {lighter_total_filled:.2f}/{target_size:.2f}")
+                    print(f"   Paradex filled: {paradex_total_filled:.2f}/{paradex_position_size:.2f}")
+                    print(f"   Lighter filled: {lighter_total_filled:.2f}/{lighter_position_size:.2f}")
 
                     # Emergency: Close all positions and retry from scratch
                     if paradex_total_filled > 0 or lighter_total_filled > 0:
@@ -714,8 +725,8 @@ class DeltaNeutralStrategy:
             print(f"\n✅ ポジションサイズOK - 調整不要")
 
         # At this point, we have a successful fill (or broke out of loop)
-        paradex_success = paradex_total_filled >= target_size * 0.99
-        lighter_success = lighter_total_filled >= target_size * 0.99
+        paradex_success = paradex_total_filled >= paradex_position_size * 0.99
+        lighter_success = lighter_total_filled >= lighter_position_size * 0.99
 
         # Check if both succeeded
         if paradex_success and lighter_success:
@@ -724,13 +735,15 @@ class DeltaNeutralStrategy:
             self.position_open = True
             self.current_position = {
                 'timestamp': datetime.now().isoformat(),
-                'size': actual_position_size,  # Use actual filled size
-                'target_size': target_size,     # Original target
+                'size': actual_position_size,  # Use actual filled size (for close-all)
+                'paradex_target_size': paradex_position_size,  # Original Paradex target
+                'lighter_target_size': lighter_position_size,   # Original Lighter target
                 'paradex_filled': paradex_total_filled,
                 'lighter_filled': lighter_total_filled,
                 'paradex_price': paradex_price,
                 'lighter_price': lighter_price,
-                'fill_ratio': min(paradex_total_filled/target_size, lighter_total_filled/target_size) * 100,
+                'paradex_fill_ratio': (paradex_total_filled/paradex_position_size) * 100,
+                'lighter_fill_ratio': (lighter_total_filled/lighter_position_size) * 100,
             }
 
             # Save position to file for emergency close
@@ -739,10 +752,11 @@ class DeltaNeutralStrategy:
             print("\n" + "="*60)
             print("✅ Delta neutral position opened successfully!")
             print("="*60)
-            print(f"   Target size: {target_size:.2f}")
-            print(f"   Paradex filled: {paradex_total_filled:.2f} ({paradex_total_filled/target_size*100:.1f}%)")
-            print(f"   Lighter filled: {lighter_total_filled:.2f} ({lighter_total_filled/target_size*100:.1f}%)")
-            print(f"   Position size: {actual_position_size:.2f}")
+            print(f"   Paradex target: {paradex_position_size:.2f}")
+            print(f"   Paradex filled: {paradex_total_filled:.2f} ({paradex_total_filled/paradex_position_size*100:.1f}%)")
+            print(f"   Lighter target: {lighter_position_size:.2f}")
+            print(f"   Lighter filled: {lighter_total_filled:.2f} ({lighter_total_filled/lighter_position_size*100:.1f}%)")
+            print(f"   Position size (for close-all): {actual_position_size:.2f}")
             print("="*60)
 
             # Send Discord notification with balance info
@@ -762,8 +776,8 @@ class DeltaNeutralStrategy:
 
         # If we got here without returning, something went wrong
         print("\n❌ Failed to open delta neutral position")
-        print(f"   Paradex fill: {paradex_total_filled:.2f}/{target_size:.2f}")
-        print(f"   Lighter fill: {lighter_total_filled:.2f}/{target_size:.2f}")
+        print(f"   Paradex fill: {paradex_total_filled:.2f}/{paradex_position_size:.2f}")
+        print(f"   Lighter fill: {lighter_total_filled:.2f}/{lighter_position_size:.2f}")
 
         return {
             'success': False,
