@@ -1082,7 +1082,7 @@ class LighterClient:
         finally:
             self._ws_running = False
 
-    def _on_orderbook_update(self, market_id: int, orderbook: Dict[str, Any]):
+    def _on_orderbook_update(self, market_id: int, orderbook):
         """
         Callback for orderbook updates from WebSocket
 
@@ -1090,24 +1090,34 @@ class LighterClient:
             market_id: Market ID
             orderbook: Orderbook data with bids and asks
         """
-        self._latest_orderbook = orderbook
-        # Debug: print bid/ask spread occasionally
-        if hasattr(self, '_ob_update_count'):
-            self._ob_update_count += 1
-        else:
-            self._ob_update_count = 1
+        try:
+            # Handle both dict and string (JSON) formats
+            import json
+            if isinstance(orderbook, str):
+                orderbook = json.loads(orderbook)
 
-        if self._ob_update_count % 100 == 0:  # Print every 100 updates
-            bids = orderbook.get('bids', [])
-            asks = orderbook.get('asks', [])
-            if bids and asks:
-                best_bid = float(bids[0]['price']) if bids[0].get('price') else 0
-                best_ask = float(asks[0]['price']) if asks[0].get('price') else 0
-                if best_bid and best_ask:
-                    spread = (best_ask - best_bid) / ((best_bid + best_ask) / 2) * 100
-                    print(f"\n📊 WS Update #{self._ob_update_count}: Bid ${best_bid:.4f} | Ask ${best_ask:.4f} | Spread {spread:.4f}%")
+            self._latest_orderbook = orderbook
 
-    def _on_account_update(self, account_id: int, account: Dict[str, Any]):
+            # Debug: print bid/ask spread occasionally
+            if hasattr(self, '_ob_update_count'):
+                self._ob_update_count += 1
+            else:
+                self._ob_update_count = 1
+
+            if self._ob_update_count % 100 == 0:  # Print every 100 updates
+                if isinstance(orderbook, dict):
+                    bids = orderbook.get('bids', [])
+                    asks = orderbook.get('asks', [])
+                    if bids and asks:
+                        best_bid = float(bids[0]['price']) if bids[0].get('price') else 0
+                        best_ask = float(asks[0]['price']) if asks[0].get('price') else 0
+                        if best_bid and best_ask:
+                            spread = (best_ask - best_bid) / ((best_bid + best_ask) / 2) * 100
+                            print(f"\n📊 WS Update #{self._ob_update_count}: Bid ${best_bid:.4f} | Ask ${best_ask:.4f} | Spread {spread:.4f}%")
+        except Exception as e:
+            print(f"\n⚠️  WebSocket orderbook error: {e} | Type: {type(orderbook)}")
+
+    def _on_account_update(self, account_id: int, account):
         """
         Callback for account updates from WebSocket
 
@@ -1115,20 +1125,29 @@ class LighterClient:
             account_id: Account ID
             account: Account data with positions
         """
-        self._latest_account = account
+        try:
+            # Handle both dict and string (JSON) formats
+            import json
+            if isinstance(account, str):
+                account = json.loads(account)
 
-        # Check for position changes
-        positions = account.get('positions', []) or account.get('perp_positions', [])
-        if positions:
-            for pos in positions:
-                size = abs(float(pos.get('size', 0) or pos.get('amount', 0)))
-                if size > 0:
-                    # Position detected - check if it changed
-                    if self._initial_position_size is not None:
-                        if size > self._initial_position_size:
-                            print(f"\n✅ WS: Position change detected! {self._initial_position_size} → {size}")
-                            self._position_event.set()  # Signal position change
-                    break
+            self._latest_account = account
+
+            # Check for position changes
+            if isinstance(account, dict):
+                positions = account.get('positions', []) or account.get('perp_positions', [])
+                if positions:
+                    for pos in positions:
+                        size = abs(float(pos.get('size', 0) or pos.get('amount', 0)))
+                        if size > 0:
+                            # Position detected - check if it changed
+                            if self._initial_position_size is not None:
+                                if size > self._initial_position_size:
+                                    print(f"\n✅ WS: Position change detected! {self._initial_position_size} → {size}")
+                                    self._position_event.set()  # Signal position change
+                            break
+        except Exception as e:
+            print(f"\n⚠️  WebSocket account error: {e} | Type: {type(account)}")
 
     async def stop_websocket(self):
         """Stop WebSocket connection"""
