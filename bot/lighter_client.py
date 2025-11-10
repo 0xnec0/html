@@ -302,16 +302,17 @@ class LighterClient:
             price_int = int(price * (10 ** price_decimals))
             base_amount_int = int(size * (10 ** size_decimals))
 
-            # Place limit order using create_market_order with tight price
-            # Note: Lighter's create_market_order with avg_execution_price acts like a limit order
-            # avg_execution_price is the maximum price we're willing to accept
-            tx, tx_hash, err = await self.client.create_market_order(
+            print(f"ℹ️  Placing LIMIT order:")
+            print(f"   Price: {price} → {price_int} (decimals: {price_decimals})")
+            print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
+
+            # Place true limit order using create_limit_order
+            tx, tx_hash, err = await self.client.create_limit_order(
                 market_index=market_id,
-                base_amount=base_amount_int,  # Integer
-                avg_execution_price=price_int,  # Integer - limit price (max acceptable)
+                base_amount=base_amount_int,  # Integer - order size
+                price_per_base=price_int,  # Integer - limit price
                 is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
                 client_order_index=client_order_index,
-                reduce_only=False,
             )
 
             if err is not None:
