@@ -413,6 +413,42 @@ class ParadexClient:
             print(f"❌ Paradex cancel error: {e}")
             return False
 
+    async def get_funding_rate(self) -> Optional[float]:
+        """
+        Get current funding rate for the market
+
+        Returns:
+            Current funding rate (8-hour rate) or None if error
+            Positive = longs pay shorts, Negative = shorts pay longs
+        """
+        try:
+            if self.client:
+                # SDK method
+                funding_data = self.client.api_client.fetch_markets_summary({"market": self.market})
+            else:
+                # REST API
+                funding_data = await self._make_request("GET", f"/markets/summary?market={self.market}")
+
+            if not funding_data:
+                return None
+
+            # Extract funding rate from response
+            results = funding_data.get('results', []) if isinstance(funding_data, dict) else funding_data
+
+            for market_data in results:
+                if market_data.get('market') == self.market:
+                    # funding_rate is typically in the market summary
+                    funding_rate = market_data.get('funding_rate')
+                    if funding_rate is not None:
+                        return float(funding_rate)
+
+            print(f"⚠️  Funding rate not found for {self.market}")
+            return None
+
+        except Exception as e:
+            print(f"❌ Paradex funding rate error: {e}")
+            return None
+
     async def close(self):
         """Close client session"""
         # Close aiohttp session if it exists

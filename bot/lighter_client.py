@@ -579,6 +579,41 @@ class LighterClient:
             print(f"❌ Lighter cancel error: {e}")
             return False
 
+    async def get_funding_rate(self) -> Optional[float]:
+        """
+        Get current funding rate for the market
+
+        Returns:
+            Current funding rate (8-hour rate) or None if error
+            Positive = longs pay shorts, Negative = shorts pay longs
+        """
+        try:
+            session = await self._get_session()
+
+            # Try to get funding rate from orderBookDetails
+            url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
+            async with session.get(url, proxy=self.proxy_url) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    if isinstance(data, dict) and 'order_book_details' in data:
+                        for book in data['order_book_details']:
+                            if book.get('symbol', '').upper() == self.market.upper():
+                                # funding_rate_8h is the 8-hour funding rate
+                                funding_rate = book.get('funding_rate_8h') or book.get('funding_rate')
+                                if funding_rate is not None:
+                                    return float(funding_rate)
+
+                    print(f"⚠️  Funding rate not found for {self.market}")
+                    return None
+                else:
+                    print(f"⚠️  Failed to fetch Lighter funding rate: {response.status}")
+                    return None
+
+        except Exception as e:
+            print(f"❌ Lighter funding rate error: {e}")
+            return None
+
     async def close(self):
         """Close client session"""
         # Close aiohttp session if it exists
