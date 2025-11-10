@@ -314,13 +314,17 @@ class LighterClient:
             print(f"   Price: {price} → {price_int} (decimals: {price_decimals})")
             print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
 
-            # Place true limit order using create_limit_order
-            tx, tx_hash, err = await self.client.create_limit_order(
+            # Place true limit order using create_order with ORDER_TYPE_LIMIT
+            tx, tx_hash, err = await self.client.create_order(
                 market_index=market_id,
-                base_amount=base_amount_int,  # Integer - order size
-                price_per_base=price_int,  # Integer - limit price
-                is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
                 client_order_index=client_order_index,
+                base_amount=base_amount_int,  # Integer - order size
+                price=price_int,  # Integer - limit price
+                is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
+                order_type=lighter.SignerClient.ORDER_TYPE_LIMIT,  # Limit order type
+                time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
+                reduce_only=False,
+                trigger_price=0,
             )
 
             if err is not None:
