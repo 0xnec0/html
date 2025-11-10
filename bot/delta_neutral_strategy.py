@@ -368,24 +368,30 @@ class DeltaNeutralStrategy:
 
         return (paradex_filled, lighter_filled)
 
-    async def _emergency_close_all(self, position_size: float) -> bool:
+    async def _emergency_close_all(self, paradex_size: float, lighter_size: float = None) -> bool:
         """
         Emergency close all positions and reset
 
         Args:
-            position_size: Size of positions to close
+            paradex_size: Size of Paradex position to close
+            lighter_size: Size of Lighter position to close (defaults to paradex_size if not provided)
 
         Returns:
             True if successfully closed
         """
+        # For backward compatibility, if lighter_size not provided, use paradex_size
+        if lighter_size is None:
+            lighter_size = paradex_size
+
         print("\n🚨 EMERGENCY: Closing all positions...")
-        print(f"   Closing {position_size:.2f} units on both exchanges")
+        print(f"   Paradex: {paradex_size:.2f} units")
+        print(f"   Lighter: {lighter_size:.2f} units")
 
         try:
-            # Close both positions
+            # Close both positions with independent sizes
             tasks = [
-                self.bot.paradex.place_market_order('SELL', position_size),  # Close LONG
-                self.bot.lighter.place_market_order('BUY', position_size)    # Close SHORT
+                self.bot.paradex.place_market_order('SELL', paradex_size),  # Close LONG
+                self.bot.lighter.place_market_order('BUY', lighter_size)    # Close SHORT
             ]
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -401,7 +407,7 @@ class DeltaNeutralStrategy:
                 # Send notification
                 await self.notifier.send_error(
                     "Emergency closure completed",
-                    f"Closed {position_size:.2f} units on both exchanges after retry failure"
+                    f"Closed Paradex: {paradex_size:.2f}, Lighter: {lighter_size:.2f} after retry failure"
                 )
                 return True
             else:
@@ -695,9 +701,11 @@ class DeltaNeutralStrategy:
                     if paradex_total_filled > 0 or lighter_total_filled > 0:
                         print(f"\n🚨 Triggering emergency closure...")
 
-                        # Close whatever we managed to fill
-                        close_size = max(paradex_total_filled, lighter_total_filled)
-                        emergency_success = await self._emergency_close_all(close_size)
+                        # Close whatever we managed to fill with independent sizes
+                        emergency_success = await self._emergency_close_all(
+                            paradex_size=paradex_total_filled,
+                            lighter_size=lighter_total_filled
+                        )
 
                         if emergency_success:
                             print(f"\n🔄 Restarting position opening from scratch...")
@@ -803,7 +811,13 @@ class DeltaNeutralStrategy:
         print("🔄 Closing Delta Neutral Position")
         print("="*60)
 
-        position_size = self.current_position['size']
+        # Get independent position sizes for each exchange
+        paradex_position_size = self.current_position.get('paradex_filled', self.current_position['size'])
+        lighter_position_size = self.current_position.get('lighter_filled', self.current_position['size'])
+
+        print(f"\n📊 Position to close:")
+        print(f"   Paradex (LONG): {paradex_position_size:.2f} units")
+        print(f"   Lighter (SHORT): {lighter_position_size:.2f} units")
 
         # Get and display current balances before closing
         print("\n💰 Checking current balances...")
@@ -842,19 +856,19 @@ class DeltaNeutralStrategy:
 
         print(f"\n📊 Closing positions...")
         if paradex_price:
-            print(f"   Paradex: SELL {position_size} @ ${paradex_price:.4f}")
+            print(f"   Paradex: SELL {paradex_position_size:.2f} @ ${paradex_price:.4f}")
         else:
-            print(f"   Paradex: SELL {position_size} @ (price unavailable)")
+            print(f"   Paradex: SELL {paradex_position_size:.2f} @ (price unavailable)")
 
         if lighter_price:
-            print(f"   Lighter: BUY {position_size} @ ${lighter_price:.4f}")
+            print(f"   Lighter: BUY {lighter_position_size:.2f} @ ${lighter_price:.4f}")
         else:
-            print(f"   Lighter: BUY {position_size} @ (price unavailable)")
+            print(f"   Lighter: BUY {lighter_position_size:.2f} @ (price unavailable)")
 
-        # Execute both orders simultaneously
+        # Execute both orders simultaneously with independent sizes
         tasks = [
-            self.bot.paradex.place_market_order('SELL', position_size),
-            self.bot.lighter.place_market_order('BUY', position_size)
+            self.bot.paradex.place_market_order('SELL', paradex_position_size),
+            self.bot.lighter.place_market_order('BUY', lighter_position_size)
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -867,25 +881,35 @@ class DeltaNeutralStrategy:
             not isinstance(lighter_result, Exception)
         )
 
-        # Calculate P&L
+        # Calculate P&L with independent position sizes
         if success:
             entry_paradex_price = self.current_position['paradex_price']
             entry_lighter_price = self.current_position['lighter_price']
 
-            paradex_pnl = (paradex_price - entry_paradex_price) * position_size
-            lighter_pnl = (entry_lighter_price - lighter_price) * position_size
+            # Calculate P&L for each exchange independently
+            paradex_pnl = (paradex_price - entry_paradex_price) * paradex_position_size
+            lighter_pnl = (entry_lighter_price - lighter_price) * lighter_position_size
             total_pnl = paradex_pnl + lighter_pnl
 
             print(f"\n💵 P&L Summary:")
-            print(f"   Paradex (LONG): ${paradex_pnl:.2f}")
-            print(f"   Lighter (SHORT): ${lighter_pnl:.2f}")
+            print(f"   Paradex (LONG):")
+            print(f"      Size: {paradex_position_size:.2f}")
+            print(f"      Entry: ${entry_paradex_price:.4f}")
+            print(f"      Exit: ${paradex_price:.4f}")
+            print(f"      P&L: ${paradex_pnl:.2f}")
+            print(f"   Lighter (SHORT):")
+            print(f"      Size: {lighter_position_size:.2f}")
+            print(f"      Entry: ${entry_lighter_price:.4f}")
+            print(f"      Exit: ${lighter_price:.4f}")
+            print(f"      P&L: ${lighter_pnl:.2f}")
             print(f"   Total P&L: ${total_pnl:.2f}")
 
-            # Save to history
+            # Save to history with independent sizes
             trade_data = {
                 'entry_time': self.current_position['timestamp'],
                 'exit_time': datetime.now().isoformat(),
-                'size': position_size,
+                'paradex_size': paradex_position_size,
+                'lighter_size': lighter_position_size,
                 'paradex_entry_price': entry_paradex_price,
                 'paradex_exit_price': paradex_price if paradex_price else 0,
                 'lighter_entry_price': entry_lighter_price,
