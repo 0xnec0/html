@@ -463,6 +463,7 @@ class LighterClient:
         """
         Get market index for a given market symbol
         Note: These indices need to be verified with Lighter API
+        Deprecated: Use _get_market_id_from_api() instead for dynamic lookup
         """
         # Market indices from Lighter protocol
         # These should be verified via /api/v1/orderBookDetails
@@ -470,12 +471,17 @@ class LighterClient:
             'ETH': 0,
             'BTC': 1,
             'DOGE': 2,
-            'JUP': 3,  # Jupiter - verify actual index
+            'JUP': 3,  # Jupiter
             'SOL': 4,
+            'ENA': 5,  # Ethena - verify actual index
         }
         index = market_indices.get(market.upper(), None)
         if index is None:
-            print(f"⚠ Unknown market {market}, defaulting to index 0")
+            print(f"⚠ Unknown market {market}, attempting dynamic lookup...")
+            # Try to get from cache
+            if market in self._market_id_cache:
+                return self._market_id_cache[market]
+            print(f"⚠ Market {market} not found in cache, defaulting to index 0")
             return 0
         return index
 
@@ -563,9 +569,15 @@ class LighterClient:
             if err is not None:
                 raise Exception(f"Failed to create auth token: {err}")
 
+            # Get market_id dynamically (preferred) or use fallback
+            market_id = await self._get_market_id_from_api(self.market)
+            if market_id is None:
+                print(f"⚠️  Using fallback market index for {self.market}")
+                market_id = self._get_market_index(self.market)
+
             # Cancel order
             tx, tx_hash, err = await self.client.cancel_order(
-                market_index=self._get_market_index(self.market),
+                market_index=market_id,
                 order_index=int(order_id)
             )
 
@@ -578,6 +590,99 @@ class LighterClient:
         except Exception as e:
             print(f"❌ Lighter cancel error: {e}")
             return False
+
+    async def get_position(self) -> Optional[Dict[str, Any]]:
+        """
+        Get current position for the market
+
+        Returns:
+            Position info with size, entry_price, etc. or None if no position/error
+        """
+        try:
+            if self.client:
+                # Use SDK to get account info
+                api_client = lighter.ApiClient()
+                try:
+                    account_api = lighter.AccountApi(api_client)
+                    account = await account_api.account(
+                        by="index",
+                        value=str(self.account_index)
+                    )
+
+                    # Convert to dict if needed
+                    account_dict = account.to_dict() if hasattr(account, 'to_dict') else account
+
+                    # Get market_id for this market
+                    market_id = await self._get_market_id_from_api(self.market)
+
+                    # Look for position in the account data
+                    if isinstance(account_dict, dict):
+                        # Check for positions array
+                        positions = account_dict.get('positions', [])
+                        if positions:
+                            for pos in positions:
+                                if pos.get('market_id') == market_id or pos.get('market') == self.market.upper():
+                                    size = float(pos.get('size', 0))
+                                    if abs(size) > 0:
+                                        return {
+                                            'size': size,
+                                            'entry_price': float(pos.get('entry_price', 0)),
+                                            'market': self.market,
+                                            'market_id': market_id
+                                        }
+
+                        # Alternative: check perp_positions
+                        perp_positions = account_dict.get('perp_positions', [])
+                        if perp_positions:
+                            for pos in perp_positions:
+                                if pos.get('market_id') == market_id or pos.get('symbol') == self.market.upper():
+                                    size = float(pos.get('size', 0) or pos.get('amount', 0))
+                                    if abs(size) > 0:
+                                        return {
+                                            'size': size,
+                                            'entry_price': float(pos.get('entry_price', 0) or pos.get('avg_entry_price', 0)),
+                                            'market': self.market,
+                                            'market_id': market_id
+                                        }
+
+                    # No position found
+                    return None
+
+                finally:
+                    await api_client.close()
+            else:
+                # Use REST API fallback
+                session = await self._get_session()
+                url = f"{self.base_url}/api/v1/account/{self.account_index}"
+
+                async with session.get(url, proxy=self.proxy_url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+
+                        # Get market_id for this market
+                        market_id = await self._get_market_id_from_api(self.market)
+
+                        # Check positions
+                        if 'positions' in data:
+                            for pos in data['positions']:
+                                if pos.get('market_id') == market_id:
+                                    size = float(pos.get('size', 0))
+                                    if abs(size) > 0:
+                                        return {
+                                            'size': size,
+                                            'entry_price': float(pos.get('entry_price', 0)),
+                                            'market': self.market,
+                                            'market_id': market_id
+                                        }
+
+                        return None
+                    else:
+                        print(f"⚠️  Failed to fetch position: HTTP {response.status}")
+                        return None
+
+        except Exception as e:
+            print(f"⚠️  Error getting position: {e}")
+            return None
 
     async def get_funding_rate(self) -> Optional[float]:
         """
@@ -708,34 +813,66 @@ class LighterClient:
         """
         print(f"\n⏳ Lighter: 約定待機中...")
         print(f"   Order ID: {order_id}")
+        print(f"   Market: {self.market}")
         print(f"   チェック間隔: {check_interval}秒")
         print(f"   タイムアウト: {timeout}秒" if timeout > 0 else "   タイムアウト: なし（無限）")
 
         start_time = asyncio.get_event_loop().time()
         check_count = 0
+        last_position_info = None
+
+        # Get initial position (if any)
+        try:
+            initial_position = await self.get_position()
+            initial_size = abs(initial_position.get('size', 0)) if initial_position else 0
+            print(f"   初期ポジション: {initial_size}")
+        except Exception as e:
+            print(f"   初期ポジション取得エラー: {e}")
+            initial_size = 0
 
         while True:
             check_count += 1
             elapsed = asyncio.get_event_loop().time() - start_time
 
             # For Lighter, we'll check position to see if order was filled
-            # Since Lighter SDK doesn't have a direct order status query,
-            # we check if the position has changed
             try:
                 position = await self.get_position()
-                if position and abs(position.get('size', 0)) > 0:
-                    print(f"\n✅ 約定確認！ポジション検出")
-                    print(f"   Position size: {position.get('size', 0)}")
+                current_size = abs(position.get('size', 0)) if position else 0
+
+                # Show detailed position info every 10 checks
+                if check_count % 10 == 0 or (position and current_size > initial_size):
+                    position_info = f"Position: {current_size} (initial: {initial_size})"
+                    if position:
+                        position_info += f" | Entry: ${position.get('entry_price', 0):.4f}"
+                    print(f"\n   [{check_count}] {position_info} | 経過: {elapsed:.0f}秒")
+                    last_position_info = position
+
+                # Check if position increased (order filled)
+                if position and current_size > initial_size:
+                    print(f"\n✅ 約定確認！ポジション増加検出")
+                    print(f"   初期サイズ: {initial_size}")
+                    print(f"   現在サイズ: {current_size}")
+                    print(f"   約定サイズ: {current_size - initial_size}")
+                    if position.get('entry_price'):
+                        print(f"   エントリー価格: ${position.get('entry_price'):.4f}")
                     return True
 
-                print(f"\r   [{check_count}] 約定待ち... | 経過: {elapsed:.0f}秒", end='', flush=True)
+                # Normal progress indicator
+                if check_count % 10 != 0:
+                    print(f"\r   [{check_count}] 約定待ち... (現在サイズ: {current_size}) | 経過: {elapsed:.0f}秒", end='', flush=True)
 
             except Exception as e:
-                print(f"\r   [{check_count}] チェック中... | 経過: {elapsed:.0f}秒", end='', flush=True)
+                if check_count % 10 == 0:
+                    print(f"\n   [{check_count}] ポジション確認エラー: {e} | 経過: {elapsed:.0f}秒")
+                else:
+                    print(f"\r   [{check_count}] チェック中... | 経過: {elapsed:.0f}秒", end='', flush=True)
 
             # Check timeout
             if timeout > 0 and elapsed >= timeout:
                 print(f"\n⏰ タイムアウト: 約定未確認")
+                print(f"   最終ポジションサイズ: {current_size if 'current_size' in locals() else 'N/A'}")
+                if last_position_info:
+                    print(f"   最終ポジション情報: {last_position_info}")
                 return False
 
             # Wait before next check
