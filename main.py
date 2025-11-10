@@ -61,11 +61,11 @@ async def main():
 
     # Delta Neutral command
     delta_parser = subparsers.add_parser('delta-neutral', help='Run delta neutral strategy (Paradex LONG + Lighter SHORT)')
-    delta_parser.add_argument('--leverage', type=int, default=10, help='Leverage multiplier (default: 10x)')
-    delta_parser.add_argument('--capital-pct', type=float, default=0.5, help='Percentage of capital to use (default: 0.5 = 50%%)')
-    delta_parser.add_argument('--usd-amount', type=float, help='Fixed USD amount per position (e.g., 50 for $50)')
-    delta_parser.add_argument('--min-hours', type=float, default=2.0, help='Minimum hold time in hours (default: 2.0)')
-    delta_parser.add_argument('--max-hours', type=float, default=3.0, help='Maximum hold time in hours (default: 3.0)')
+    delta_parser.add_argument('--leverage', type=int, default=10, help='Leverage multiplier (default: 10x or DELTA_NEUTRAL_LEVERAGE from .env)')
+    delta_parser.add_argument('--capital-pct', type=float, default=0.5, help='Percentage of capital to use (default: 0.5 = 50%% or DELTA_NEUTRAL_CAPITAL_PCT from .env)')
+    delta_parser.add_argument('--usd-amount', type=float, help='Fixed USD amount per position (e.g., 50 for $50). If not specified, uses DELTA_NEUTRAL_USD_AMOUNT from .env')
+    delta_parser.add_argument('--min-hours', type=float, default=2.0, help='Minimum hold time in hours (default: 2.0 or DELTA_NEUTRAL_MIN_HOURS from .env)')
+    delta_parser.add_argument('--max-hours', type=float, default=3.0, help='Maximum hold time in hours (default: 3.0 or DELTA_NEUTRAL_MAX_HOURS from .env)')
     delta_parser.add_argument('--once', action='store_true', help='Run only once (default: loop continuously)')
     delta_parser.add_argument('--max-cycles', type=int, help='Maximum cycles in loop mode (default: unlimited)')
 
@@ -151,12 +151,22 @@ async def main():
             )
 
         elif args.command == 'delta-neutral':
-            # Use command-line args if provided, otherwise use config
+            # Use command-line args if provided, otherwise use config from .env
             usd_amount = args.usd_amount if args.usd_amount is not None else config.delta_neutral_usd_amount
             leverage = args.leverage if args.leverage != 10 else config.delta_neutral_leverage
             capital_pct = args.capital_pct if args.capital_pct != 0.5 else config.delta_neutral_capital_pct
             min_hours = args.min_hours if args.min_hours != 2.0 else config.delta_neutral_min_hours
             max_hours = args.max_hours if args.max_hours != 3.0 else config.delta_neutral_max_hours
+
+            # Display configuration being used
+            print(f"\n📋 Delta Neutral Strategy Configuration:")
+            print(f"   USD Amount: ${usd_amount:.2f}" + (" (from .env)" if args.usd_amount is None else " (from --usd-amount)") if usd_amount else "   USD Amount: Using balance-based calculation")
+            print(f"   Leverage: {leverage}x" + (" (from .env)" if args.leverage == 10 else " (from --leverage)"))
+            print(f"   Capital %: {capital_pct*100:.0f}%" + (" (from .env)" if args.capital_pct == 0.5 else " (from --capital-pct)"))
+            print(f"   Hold Time: {min_hours}-{max_hours} hours" + (" (from .env)" if args.min_hours == 2.0 and args.max_hours == 3.0 else " (from CLI args)"))
+            print(f"   Mode: {'Single execution' if args.once else 'Continuous loop'}")
+            if not args.once and args.max_cycles:
+                print(f"   Max Cycles: {args.max_cycles}")
 
             strategy = DeltaNeutralStrategy(
                 bot=bot,
