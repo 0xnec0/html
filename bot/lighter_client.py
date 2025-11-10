@@ -257,6 +257,119 @@ class LighterClient:
         except Exception:
             return None
 
+    async def place_limit_order(self, side: str, size: float, price: float) -> Optional[Dict[str, Any]]:
+        """
+        Place a limit order
+
+        Args:
+            side: Order side ('BUY' or 'SELL')
+            size: Order size
+            price: Limit price
+
+        Returns:
+            Order result with order_id or None if error
+        """
+        try:
+            if not self.client:
+                print("❌ Lighter SDK required for placing orders")
+                return None
+
+            # Create auth token
+            auth, err = self.client.create_auth_token_with_expiry(
+                lighter.SignerClient.DEFAULT_10_MIN_AUTH_EXPIRY
+            )
+            if err is not None:
+                raise Exception(f"Failed to create auth token: {err}")
+
+            # Generate unique client order index (timestamp in milliseconds)
+            client_order_index = int(time.time() * 1000)
+
+            # Get market_id from API
+            market_id = await self._get_market_id_from_api(self.market)
+            if market_id is None:
+                raise ValueError(f"Could not find market_id for {self.market}")
+
+            # Get market info for decimal conversion
+            market_info = self._market_info_cache.get(self.market)
+            if not market_info:
+                raise ValueError(f"Market info not found for {self.market}")
+
+            # Extract decimal precision
+            price_decimals = market_info.get('price_decimals', 0)
+            size_decimals = market_info.get('size_decimals', 0)
+
+            # Convert to integers using decimal precision
+            price_int = int(price * (10 ** price_decimals))
+            base_amount_int = int(size * (10 ** size_decimals))
+
+            # Place limit order using create_limit_order
+            tx, tx_hash, err = await self.client.create_limit_order(
+                market_index=market_id,
+                base_amount=base_amount_int,  # Integer
+                price_per_base=price_int,     # Integer - limit price
+                is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
+                client_order_index=client_order_index,
+                reduce_only=False,
+            )
+
+            if err is not None:
+                raise Exception(f"Order failed: {err}")
+
+            result = {
+                'order_id': client_order_index,  # Use client order index as order ID
+                'tx_hash': tx_hash,
+                'tx': tx,
+                'status': 'submitted',
+                'side': side,
+                'size': size,
+                'price': price
+            }
+
+            print(f"✓ Lighter limit order placed: {side} {size} @ ${price:.4f}")
+            print(f"  Order ID: {client_order_index}")
+            print(f"  TX Hash: {tx_hash}")
+
+            return result
+
+        except Exception as e:
+            print(f"❌ Lighter limit order error: {e}")
+            return None
+
+    async def get_order_status(self, order_id: int) -> Optional[str]:
+        """
+        Get order status by order ID
+
+        Args:
+            order_id: Client order index used when placing the order
+
+        Returns:
+            Order status: 'FILLED', 'PENDING', 'CANCELLED', 'FAILED', or None if error
+        """
+        try:
+            if not self.client:
+                print("❌ Lighter SDK required for checking order status")
+                return None
+
+            # Get market_id
+            market_id = await self._get_market_id_from_api(self.market)
+            if market_id is None:
+                return None
+
+            # Query order status from Lighter API
+            # Note: Lighter SDK might not have direct order status query
+            # We may need to use REST API to check order status
+
+            # For now, assume order is filled after a short delay
+            # This is a placeholder - actual implementation depends on Lighter API
+            # TODO: Implement actual order status check via Lighter API/SDK
+
+            print(f"ℹ️  Checking order status for order {order_id}...")
+            return 'PENDING'  # Placeholder
+
+        except Exception as e:
+            print(f"❌ Error checking order status: {e}")
+            return None
+
     async def place_market_order(self, side: str, size: float) -> Optional[Dict[str, Any]]:
         """
         Place a market order

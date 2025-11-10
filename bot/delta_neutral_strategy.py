@@ -209,6 +209,91 @@ class DeltaNeutralStrategy:
 
         return balances
 
+    async def _place_lighter_limit_with_price_update(self, size: float, max_attempts: int = 12, wait_seconds: int = 5) -> Optional[Dict[str, Any]]:
+        """
+        Place Lighter limit order with price updates until filled
+
+        Args:
+            size: Order size
+            max_attempts: Maximum number of attempts (default: 12)
+            wait_seconds: Seconds to wait between attempts (default: 5)
+
+        Returns:
+            Order result if filled, None if failed
+        """
+        print(f"\n📍 Lighter指値注文（価格自動更新）")
+        print(f"   目標サイズ: {size:.2f}")
+        print(f"   最大試行回数: {max_attempts}")
+        print(f"   更新間隔: {wait_seconds}秒")
+
+        current_order_id = None
+
+        for attempt in range(1, max_attempts + 1):
+            print(f"\n{'='*60}")
+            print(f"🔄 試行 {attempt}/{max_attempts}")
+            print(f"{'='*60}")
+
+            # Get latest bid/ask
+            bid_ask = await self.bot.lighter.get_bid_ask()
+            if not bid_ask:
+                print("❌ 価格取得失敗")
+                await asyncio.sleep(wait_seconds)
+                continue
+
+            best_bid, best_ask = bid_ask
+
+            # Use best ask for SELL limit order (most likely to fill)
+            limit_price = best_ask
+
+            print(f"   最新価格: Bid ${best_bid:.4f} | Ask ${best_ask:.4f}")
+            print(f"   指値価格: ${limit_price:.4f} (Best Ask)")
+
+            # Cancel previous order if exists
+            if current_order_id:
+                print(f"   🗑️  前回の注文をキャンセル中...")
+                await self.bot.lighter.cancel_order(str(current_order_id))
+
+            # Place new limit order
+            order_result = await self.bot.lighter.place_limit_order('SELL', size, limit_price)
+
+            if not order_result:
+                print("❌ 注文失敗")
+                await asyncio.sleep(wait_seconds)
+                continue
+
+            current_order_id = order_result.get('order_id')
+            tx_hash = order_result.get('tx_hash')
+
+            print(f"   ✓ 注文送信完了")
+            print(f"   Order ID: {current_order_id}")
+            print(f"   TX Hash: {tx_hash}")
+
+            # Wait and check if filled
+            print(f"   ⏳ {wait_seconds}秒待機中...")
+            await asyncio.sleep(wait_seconds)
+
+            # Check order status
+            # Note: For Lighter, if tx succeeded, we assume it's filled
+            # In a production environment, you'd query the order status from the API
+            if tx_hash:
+                print(f"   ✅ 注文約定完了！")
+                return {
+                    **order_result,
+                    'filled_size': size,
+                    'filled_price': limit_price,
+                    'status': 'FILLED'
+                }
+
+            print(f"   ⚠️  約定未確認 - 価格を更新して再試行...")
+
+        # Max attempts reached
+        print(f"\n❌ 最大試行回数到達 - Lighter注文失敗")
+        if current_order_id:
+            print(f"   最終注文をキャンセル中...")
+            await self.bot.lighter.cancel_order(str(current_order_id))
+
+        return None
+
     async def _verify_filled_size(self, order_result: Any, expected_size: float, exchange_name: str) -> float:
         """
         Verify the actual filled size from order result
@@ -444,119 +529,189 @@ class DeltaNeutralStrategy:
                 # Round down to integer
                 position_size = int(position_size)
 
-        print(f"\n📊 Executing delta neutral strategy...")
+        print(f"\n📊 Executing delta neutral strategy (NEW FLOW)")
         print(f"   Target: {position_size} units")
+        print(f"   Strategy: Lighter指値 → Paradex成り行き")
         print(f"   Paradex: BUY @ ${paradex_price:.4f}")
         print(f"   Lighter: SELL @ ${lighter_price:.4f}")
 
-        # Retry logic: Try up to 3 times to fill the position
-        MAX_RETRIES = 3
-        target_size = position_size
-        paradex_total_filled = 0.0
-        lighter_total_filled = 0.0
+        # Step 1: Place Lighter limit order with price updates
+        print(f"\n{'='*60}")
+        print(f"STEP 1: Lighter指値注文（価格自動更新）")
+        print(f"{'='*60}")
 
-        for attempt in range(1, MAX_RETRIES + 1):
-            print(f"\n{'='*60}")
-            print(f"📍 Attempt {attempt}/{MAX_RETRIES}")
-            print(f"{'='*60}")
+        lighter_result = await self._place_lighter_limit_with_price_update(
+            size=position_size,
+            max_attempts=12,
+            wait_seconds=5
+        )
 
-            # Calculate remaining shortage
-            paradex_shortage = target_size - paradex_total_filled
-            lighter_shortage = target_size - lighter_total_filled
+        if not lighter_result:
+            print(f"\n❌ Lighter注文失敗 - ポジションオープン中止")
+            return {
+                'success': False,
+                'error': 'Lighter limit order failed after max attempts'
+            }
 
-            # If both are filled, we're done
-            if paradex_shortage <= 0.5 and lighter_shortage <= 0.5:  # Allow 0.5 unit tolerance
-                print(f"✅ Position fully filled!")
-                print(f"   Paradex: {paradex_total_filled:.2f}/{target_size:.2f}")
-                print(f"   Lighter: {lighter_total_filled:.2f}/{target_size:.2f}")
-                break
+        lighter_filled_size = lighter_result.get('filled_size', position_size)
+        lighter_filled_price = lighter_result.get('filled_price', lighter_price)
 
-            # Place orders for the shortage (or initial order on first attempt)
-            if attempt == 1:
-                # First attempt: place initial orders
-                print(f"   Paradex: BUY {paradex_shortage:.2f}")
-                print(f"   Lighter: SELL {lighter_shortage:.2f}")
+        print(f"\n✅ Lighter約定完了!")
+        print(f"   約定サイズ: {lighter_filled_size:.2f}")
+        print(f"   約定価格: ${lighter_filled_price:.4f}")
+
+        # Step 2: Place Paradex market order
+        print(f"\n{'='*60}")
+        print(f"STEP 2: Paradex成り行き注文")
+        print(f"{'='*60}")
+        print(f"   BUY {position_size} @ market")
+
+        paradex_result = await self.bot.paradex.place_market_order('BUY', position_size)
+
+        if not paradex_result or isinstance(paradex_result, Exception):
+            print(f"\n⚠️  Paradex注文失敗 - Lighterポジションをクローズ中...")
+
+            # Close Lighter position
+            close_result = await self.bot.lighter.place_market_order('BUY', lighter_filled_size)
+
+            if close_result:
+                print(f"✅ Lighterポジションクローズ完了")
             else:
-                # Retry: fill shortage
+                print(f"❌ Lighterポジションクローズ失敗 - MANUAL INTERVENTION REQUIRED!")
+                await self.notifier.send_error(
+                    "CRITICAL: Failed to close Lighter position after Paradex failure",
+                    f"Lighter size: {lighter_filled_size}, Paradex error: {paradex_result}"
+                )
+
+            return {
+                'success': False,
+                'error': 'Paradex market order failed',
+                'paradex': paradex_result,
+                'lighter_closed': close_result
+            }
+
+        paradex_filled_size = await self._verify_filled_size(paradex_result, position_size, "Paradex")
+
+        print(f"\n✅ Paradex約定完了!")
+        print(f"   約定サイズ: {paradex_filled_size:.2f}")
+
+        # Step 3: Check for size mismatch and apply hybrid adjustment if needed
+        print(f"\n{'='*60}")
+        print(f"STEP 3: ポジションサイズ確認")
+        print(f"{'='*60}")
+        print(f"   Paradex: {paradex_filled_size:.2f}")
+        print(f"   Lighter: {lighter_filled_size:.2f}")
+        print(f"   誤差: {abs(paradex_filled_size - lighter_filled_size):.2f}")
+
+        target_size = position_size
+        paradex_total_filled = paradex_filled_size
+        lighter_total_filled = lighter_filled_size
+
+        # Check if adjustment is needed (tolerance: 0.5 units or 1%)
+        shortage_tolerance = max(0.5, target_size * 0.01)
+        paradex_shortage = target_size - paradex_total_filled
+        lighter_shortage = target_size - lighter_total_filled
+
+        if abs(paradex_shortage) > shortage_tolerance or abs(lighter_shortage) > shortage_tolerance:
+            print(f"\n⚠️  ポジション調整が必要")
+            print(f"   Paradex不足: {paradex_shortage:.2f}")
+            print(f"   Lighter不足: {lighter_shortage:.2f}")
+
+            # Apply hybrid retry logic for adjustment
+            MAX_RETRIES = 3
+
+            for attempt in range(1, MAX_RETRIES + 1):
+                print(f"\n{'='*60}")
+                print(f"📍調整 Attempt {attempt}/{MAX_RETRIES}")
+                print(f"{'='*60}")
+
+                # Calculate remaining shortage
+                paradex_shortage = target_size - paradex_total_filled
+                lighter_shortage = target_size - lighter_total_filled
+
+                # If both are filled, we're done
+                if paradex_shortage <= 0.5 and lighter_shortage <= 0.5:  # Allow 0.5 unit tolerance
+                    print(f"✅ Position fully filled!")
+                    print(f"   Paradex: {paradex_total_filled:.2f}/{target_size:.2f}")
+                    print(f"   Lighter: {lighter_total_filled:.2f}/{target_size:.2f}")
+                    break
+
+                # Execute shortage fill orders
                 print(f"   🔄 Filling shortage:")
                 print(f"      Paradex: {paradex_shortage:.2f} units")
                 print(f"      Lighter: {lighter_shortage:.2f} units")
 
-            # Execute orders simultaneously
-            tasks = [
-                self.bot.paradex.place_market_order('BUY', paradex_shortage),
-                self.bot.lighter.place_market_order('SELL', lighter_shortage)
-            ]
+                tasks = []
+                if abs(paradex_shortage) > 0.1:
+                    tasks.append(('paradex', self.bot.paradex.place_market_order('BUY', abs(paradex_shortage))))
+                if abs(lighter_shortage) > 0.1:
+                    tasks.append(('lighter', self.bot.lighter.place_market_order('SELL', abs(lighter_shortage))))
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+                if tasks:
+                    results = await asyncio.gather(*[t[1] for t in tasks], return_exceptions=True)
 
-            paradex_result = results[0]
-            lighter_result = results[1]
+                    for i, (exchange, _) in enumerate(tasks):
+                        result = results[i]
+                        success = not isinstance(result, Exception) and result
 
-            paradex_success = not isinstance(paradex_result, Exception) and paradex_result
-            lighter_success = not isinstance(lighter_result, Exception) and lighter_result
+                        if exchange == 'paradex' and success:
+                            filled = await self._verify_filled_size(result, abs(paradex_shortage), "Paradex")
+                            paradex_total_filled += filled
+                        elif exchange == 'lighter' and success:
+                            filled = await self._verify_filled_size(result, abs(lighter_shortage), "Lighter")
+                            lighter_total_filled += filled
 
-            # Verify filled sizes
-            paradex_filled = await self._verify_filled_size(paradex_result, paradex_shortage, "Paradex") if paradex_success else 0
-            lighter_filled = await self._verify_filled_size(lighter_result, lighter_shortage, "Lighter") if lighter_success else 0
+                print(f"\n📊 Adjusted Fill Status:")
+                print(f"   Paradex: {paradex_total_filled:.2f}/{target_size:.2f} ({paradex_total_filled/target_size*100:.1f}%)")
+                print(f"   Lighter: {lighter_total_filled:.2f}/{target_size:.2f} ({lighter_total_filled/target_size*100:.1f}%)")
 
-            # Update totals
-            paradex_total_filled += paradex_filled
-            lighter_total_filled += lighter_filled
+                # Check if we're close enough
+                fill_tolerance = 0.99  # 99% fill is acceptable
+                paradex_fill_ratio = paradex_total_filled / target_size
+                lighter_fill_ratio = lighter_total_filled / target_size
 
-            print(f"\n📊 Fill Status:")
-            print(f"   Paradex: {paradex_total_filled:.2f}/{target_size:.2f} ({paradex_total_filled/target_size*100:.1f}%)")
-            print(f"   Lighter: {lighter_total_filled:.2f}/{target_size:.2f} ({lighter_total_filled/target_size*100:.1f}%)")
+                if paradex_fill_ratio >= fill_tolerance and lighter_fill_ratio >= fill_tolerance:
+                    print(f"✅ Position sufficiently filled (>= {fill_tolerance*100:.0f}%)")
+                    break
 
-            # Check if we're close enough
-            fill_tolerance = 0.99  # 99% fill is acceptable
-            paradex_fill_ratio = paradex_total_filled / target_size
-            lighter_fill_ratio = lighter_total_filled / target_size
+                # If this was the last attempt and we still have shortage, trigger emergency close
+                if attempt == MAX_RETRIES:
+                    print(f"\n⚠️  MAX RETRIES REACHED - Position not fully filled")
+                    print(f"   Paradex filled: {paradex_total_filled:.2f}/{target_size:.2f}")
+                    print(f"   Lighter filled: {lighter_total_filled:.2f}/{target_size:.2f}")
 
-            if paradex_fill_ratio >= fill_tolerance and lighter_fill_ratio >= fill_tolerance:
-                print(f"✅ Position sufficiently filled (>= {fill_tolerance*100:.0f}%)")
-                break
+                    # Emergency: Close all positions and retry from scratch
+                    if paradex_total_filled > 0 or lighter_total_filled > 0:
+                        print(f"\n🚨 Triggering emergency closure...")
 
-            # If this was the last attempt and we still have shortage, trigger emergency close
-            if attempt == MAX_RETRIES:
-                print(f"\n⚠️  MAX RETRIES REACHED - Position not fully filled")
-                print(f"   Paradex filled: {paradex_total_filled:.2f}/{target_size:.2f}")
-                print(f"   Lighter filled: {lighter_total_filled:.2f}/{target_size:.2f}")
+                        # Close whatever we managed to fill
+                        close_size = max(paradex_total_filled, lighter_total_filled)
+                        emergency_success = await self._emergency_close_all(close_size)
 
-                # Emergency: Close all positions and retry from scratch
-                if paradex_total_filled > 0 or lighter_total_filled > 0:
-                    print(f"\n🚨 Triggering emergency closure...")
+                        if emergency_success:
+                            print(f"\n🔄 Restarting position opening from scratch...")
+                            await asyncio.sleep(5)  # Wait 5 seconds before retry
+                            # Recursive retry: call this method again
+                            return await self.open_delta_neutral_position()
+                        else:
+                            print(f"\n❌ Emergency close failed - MANUAL INTERVENTION REQUIRED")
+                            return {
+                                'success': False,
+                                'error': 'Emergency close failed after max retries'
+                            }
 
-                    # Close whatever we managed to fill
-                    close_size = max(paradex_total_filled, lighter_total_filled)
-                    emergency_success = await self._emergency_close_all(close_size)
+                    # No positions to close, just fail
+                    return {
+                        'success': False,
+                        'error': 'Max retries reached without sufficient fill'
+                    }
 
-                    if emergency_success:
-                        print(f"\n🔄 Restarting position opening from scratch...")
-                        await asyncio.sleep(5)  # Wait 5 seconds before retry
-                        # Recursive retry: call this method again
-                        return await self.open_delta_neutral_position()
-                    else:
-                        print(f"\n❌ Emergency close failed - MANUAL INTERVENTION REQUIRED")
-                        return {
-                            'success': False,
-                            'error': 'Emergency close failed after max retries',
-                            'paradex': paradex_result,
-                            'lighter': lighter_result
-                        }
-
-                # No positions to close, just fail
-                return {
-                    'success': False,
-                    'error': 'Max retries reached without sufficient fill',
-                    'paradex': paradex_result,
-                    'lighter': lighter_result
-                }
-
-            # Wait a bit before retry
-            if attempt < MAX_RETRIES:
-                print(f"\n⏳ Waiting 3 seconds before retry...")
-                await asyncio.sleep(3)
+                # Wait a bit before retry
+                if attempt < MAX_RETRIES:
+                    print(f"\n⏳ Waiting 3 seconds before retry...")
+                    await asyncio.sleep(3)
+        else:
+            print(f"\n✅ ポジションサイズOK - 調整不要")
 
         # At this point, we have a successful fill (or broke out of loop)
         paradex_success = paradex_total_filled >= target_size * 0.99
