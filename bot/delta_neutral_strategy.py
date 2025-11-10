@@ -536,78 +536,78 @@ class DeltaNeutralStrategy:
                 paradex_position_size = position_size
                 lighter_position_size = position_size
 
-        print(f"\n📊 Executing delta neutral strategy (NEW FLOW)")
-        print(f"   Strategy: Lighter指値 → Paradex成り行き")
+        print(f"\n📊 Executing delta neutral strategy (MARKET ORDER FLOW)")
+        print(f"   Strategy: 両取引所で同時成行注文")
         print(f"   Paradex target: {paradex_position_size} units @ ${paradex_price:.4f}")
         print(f"   Lighter target: {lighter_position_size} units @ ${lighter_price:.4f}")
 
-        # Step 1: Place Lighter limit order with price updates
+        # Execute both market orders simultaneously
         print(f"\n{'='*60}")
-        print(f"STEP 1: Lighter指値注文（価格自動更新）")
+        print(f"STEP 1: 両取引所で同時成行注文")
         print(f"{'='*60}")
+        print(f"   Paradex: BUY {paradex_position_size} @ market")
+        print(f"   Lighter: SELL {lighter_position_size} @ market")
 
-        lighter_result = await self._place_lighter_limit_with_price_update(
-            size=lighter_position_size,
-            max_attempts=12,
-            wait_seconds=5
-        )
+        # Place both orders at the same time
+        tasks = [
+            self.bot.paradex.place_market_order('BUY', paradex_position_size),
+            self.bot.lighter.place_market_order('SELL', lighter_position_size)
+        ]
 
-        if not lighter_result:
-            print(f"\n❌ Lighter注文失敗 - ポジションオープン中止")
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        paradex_result = results[0]
+        lighter_result = results[1]
+
+        # Check if both orders succeeded
+        if not paradex_result or isinstance(paradex_result, Exception):
+            print(f"\n❌ Paradex注文失敗: {paradex_result}")
             return {
                 'success': False,
-                'error': 'Lighter limit order failed after max attempts'
+                'error': f'Paradex market order failed: {paradex_result}'
             }
 
-        lighter_filled_size = lighter_result.get('filled_size', lighter_position_size)
-        lighter_filled_price = lighter_result.get('filled_price', lighter_price)
+        if not lighter_result or isinstance(lighter_result, Exception):
+            print(f"\n❌ Lighter注文失敗: {lighter_result}")
+            print(f"⚠️  Paradexポジションをクローズ中...")
 
-        print(f"\n✅ Lighter約定完了!")
-        print(f"   目標: {lighter_position_size:.2f}")
-        print(f"   約定サイズ: {lighter_filled_size:.2f}")
-        print(f"   約定価格: ${lighter_filled_price:.4f}")
-        print(f"   約定USD: ${lighter_filled_size * lighter_filled_price:.2f}")
-
-        # Step 2: Place Paradex market order
-        print(f"\n{'='*60}")
-        print(f"STEP 2: Paradex成り行き注文")
-        print(f"{'='*60}")
-        print(f"   BUY {paradex_position_size} @ market")
-
-        paradex_result = await self.bot.paradex.place_market_order('BUY', paradex_position_size)
-
-        if not paradex_result or isinstance(paradex_result, Exception):
-            print(f"\n⚠️  Paradex注文失敗 - Lighterポジションをクローズ中...")
-
-            # Close Lighter position
-            close_result = await self.bot.lighter.place_market_order('BUY', lighter_filled_size)
+            # Close Paradex position
+            close_result = await self.bot.paradex.place_market_order('SELL', paradex_position_size)
 
             if close_result:
-                print(f"✅ Lighterポジションクローズ完了")
+                print(f"✅ Paradexポジションクローズ完了")
             else:
-                print(f"❌ Lighterポジションクローズ失敗 - MANUAL INTERVENTION REQUIRED!")
+                print(f"❌ Paradexポジションクローズ失敗 - MANUAL INTERVENTION REQUIRED!")
                 await self.notifier.send_error(
-                    "CRITICAL: Failed to close Lighter position after Paradex failure",
-                    f"Lighter size: {lighter_filled_size}, Paradex error: {paradex_result}"
+                    "CRITICAL: Failed to close Paradex position after Lighter failure",
+                    f"Paradex size: {paradex_position_size}, Lighter error: {lighter_result}"
                 )
 
             return {
                 'success': False,
-                'error': 'Paradex market order failed',
-                'paradex': paradex_result,
-                'lighter_closed': close_result
+                'error': f'Lighter market order failed: {lighter_result}',
+                'paradex_closed': close_result
             }
 
+        # Verify filled sizes
         paradex_filled_size = await self._verify_filled_size(paradex_result, paradex_position_size, "Paradex")
+        lighter_filled_size = await self._verify_filled_size(lighter_result, lighter_position_size, "Lighter")
 
-        print(f"\n✅ Paradex約定完了!")
+        print(f"\n✅ 両取引所で約定完了!")
+        print(f"\n📊 Paradex (LONG):")
         print(f"   目標: {paradex_position_size:.2f}")
         print(f"   約定サイズ: {paradex_filled_size:.2f}")
+        print(f"   約定価格: ${paradex_price:.4f}")
         print(f"   約定USD: ${paradex_filled_size * paradex_price:.2f}")
 
-        # Step 3: Check for size mismatch and apply hybrid adjustment if needed
+        print(f"\n📊 Lighter (SHORT):")
+        print(f"   目標: {lighter_position_size:.2f}")
+        print(f"   約定サイズ: {lighter_filled_size:.2f}")
+        print(f"   約定価格: ${lighter_price:.4f}")
+        print(f"   約定USD: ${lighter_filled_size * lighter_price:.2f}")
+
+        # Step 2: Check for size mismatch and apply hybrid adjustment if needed
         print(f"\n{'='*60}")
-        print(f"STEP 3: ポジションサイズ確認")
+        print(f"STEP 2: ポジションサイズ確認")
         print(f"{'='*60}")
         print(f"   Paradex: {paradex_filled_size:.2f} / {paradex_position_size:.2f} (目標)")
         print(f"   Lighter: {lighter_filled_size:.2f} / {lighter_position_size:.2f} (目標)")
