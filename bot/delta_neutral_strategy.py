@@ -602,31 +602,80 @@ class DeltaNeutralStrategy:
                 paradex_position_size = position_size
                 lighter_position_size = position_size
 
-        print(f"\n📊 Executing delta neutral strategy (MARKET ORDER FLOW)")
-        print(f"   Strategy: 両取引所で同時成行注文")
+        print(f"\n📊 Executing delta neutral strategy (SEQUENTIAL ORDER FLOW)")
+        print(f"   Strategy: Lighter指値注文 → 約定検知 → Paradex成行注文")
         print(f"   Paradex: {paradex_side} {paradex_position_size} units @ ${paradex_price:.4f}")
         print(f"   Lighter: {lighter_side} {lighter_position_size} units @ ${lighter_price:.4f}")
-
-        # Execute both market orders simultaneously
-        print(f"\n{'='*60}")
-        print(f"STEP 1: 両取引所で同時成行注文")
-        print(f"{'='*60}")
-        print(f"   Paradex: {paradex_side} {paradex_position_size} @ market")
-        print(f"   Lighter: {lighter_side} {lighter_position_size} @ market")
 
         # Convert LONG/SHORT to BUY/SELL
         paradex_order_side = 'BUY' if paradex_side == 'LONG' else 'SELL'
         lighter_order_side = 'BUY' if lighter_side == 'LONG' else 'SELL'
 
-        # Place both orders at the same time
-        tasks = [
-            self.bot.paradex.place_market_order(paradex_order_side, paradex_position_size),
-            self.bot.lighter.place_market_order(lighter_order_side, lighter_position_size)
-        ]
+        # Get Lighter order configuration
+        lighter_spread_max = self.bot.config.lighter_spread_max_pct
+        lighter_timeout = self.bot.config.lighter_order_timeout
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        paradex_result = results[0]
-        lighter_result = results[1]
+        # STEP 1: Place Lighter limit order with spread check
+        print(f"\n{'='*60}")
+        print(f"STEP 1: Lighter指値注文（スプレッド監視）")
+        print(f"{'='*60}")
+        print(f"   Side: {lighter_order_side} | Size: {lighter_position_size}")
+        print(f"   最大スプレッド: {lighter_spread_max}%")
+        print(f"   タイムアウト: {lighter_timeout}秒" if lighter_timeout > 0 else "   タイムアウト: なし")
+
+        lighter_result = await self.bot.lighter.place_limit_order_with_spread_check(
+            side=lighter_order_side,
+            size=lighter_position_size,
+            max_spread_pct=lighter_spread_max,
+            check_interval=2.0,
+            timeout=lighter_timeout
+        )
+
+        if not lighter_result:
+            print(f"\n❌ Lighter指値注文失敗")
+            return {
+                'success': False,
+                'error': 'Lighter limit order failed or timeout'
+            }
+
+        lighter_order_id = lighter_result.get('order_id')
+        print(f"\n✅ Lighter注文送信成功！ Order ID: {lighter_order_id}")
+
+        # STEP 2: Wait for Lighter order fill
+        print(f"\n{'='*60}")
+        print(f"STEP 2: Lighter約定待機")
+        print(f"{'='*60}")
+
+        fill_timeout = lighter_timeout if lighter_timeout > 0 else 60.0
+        filled = await self.bot.lighter.wait_for_order_fill(
+            order_id=lighter_order_id,
+            check_interval=2.0,
+            timeout=fill_timeout
+        )
+
+        if not filled:
+            print(f"\n❌ Lighter約定タイムアウト")
+            # Try to cancel the order
+            print(f"   注文をキャンセル中...")
+            await self.bot.lighter.cancel_order(str(lighter_order_id))
+            return {
+                'success': False,
+                'error': 'Lighter order fill timeout'
+            }
+
+        print(f"\n✅ Lighter約定確認！")
+
+        # STEP 3: Immediately place Paradex market order
+        print(f"\n{'='*60}")
+        print(f"STEP 3: Paradex成行注文（即時実行）")
+        print(f"{'='*60}")
+        print(f"   Side: {paradex_order_side} | Size: {paradex_position_size}")
+        print(f"   Type: Market order (スプレッド無視)")
+
+        paradex_result = await self.bot.paradex.place_market_order(
+            paradex_order_side,
+            paradex_position_size
+        )
 
         # Check if both orders succeeded
         if not paradex_result or isinstance(paradex_result, Exception):
@@ -927,7 +976,8 @@ class DeltaNeutralStrategy:
         paradex_close_side = 'SELL' if paradex_side == 'LONG' else 'BUY'
         lighter_close_side = 'SELL' if lighter_side == 'LONG' else 'BUY'
 
-        print(f"\n📊 Closing positions...")
+        print(f"\n📊 Closing positions (SEQUENTIAL ORDER FLOW)...")
+        print(f"   Strategy: Lighter指値注文 → 約定検知 → Paradex成行注文")
         if paradex_price:
             print(f"   Paradex: {paradex_close_side} {paradex_position_size:.2f} @ ${paradex_price:.4f} (Close {paradex_side})")
         else:
@@ -938,16 +988,80 @@ class DeltaNeutralStrategy:
         else:
             print(f"   Lighter: {lighter_close_side} {lighter_position_size:.2f} @ (price unavailable) (Close {lighter_side})")
 
-        # Execute both orders simultaneously with independent sizes
-        tasks = [
-            self.bot.paradex.place_market_order(paradex_close_side, paradex_position_size),
-            self.bot.lighter.place_market_order(lighter_close_side, lighter_position_size)
-        ]
+        # Get Lighter order configuration
+        lighter_spread_max = self.bot.config.lighter_spread_max_pct
+        lighter_timeout = self.bot.config.lighter_order_timeout
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # STEP 1: Place Lighter limit order with spread check
+        print(f"\n{'='*60}")
+        print(f"STEP 1: Lighter指値注文（スプレッド監視）")
+        print(f"{'='*60}")
+        print(f"   Side: {lighter_close_side} | Size: {lighter_position_size}")
+        print(f"   最大スプレッド: {lighter_spread_max}%")
+        print(f"   タイムアウト: {lighter_timeout}秒" if lighter_timeout > 0 else "   タイムアウト: なし")
 
-        paradex_result = results[0]
-        lighter_result = results[1]
+        lighter_result = await self.bot.lighter.place_limit_order_with_spread_check(
+            side=lighter_close_side,
+            size=lighter_position_size,
+            max_spread_pct=lighter_spread_max,
+            check_interval=2.0,
+            timeout=lighter_timeout
+        )
+
+        if not lighter_result:
+            print(f"\n❌ Lighterクローズ指値注文失敗")
+            print(f"⚠️  ポジションクローズ失敗 - MANUAL INTERVENTION REQUIRED!")
+            await self.notifier.send_error(
+                "CRITICAL: Failed to close Lighter position",
+                f"Lighter size: {lighter_position_size}, Side: {lighter_close_side}"
+            )
+            return {
+                'success': False,
+                'error': 'Lighter close limit order failed or timeout'
+            }
+
+        lighter_order_id = lighter_result.get('order_id')
+        print(f"\n✅ Lighter注文送信成功！ Order ID: {lighter_order_id}")
+
+        # STEP 2: Wait for Lighter order fill
+        print(f"\n{'='*60}")
+        print(f"STEP 2: Lighter約定待機")
+        print(f"{'='*60}")
+
+        fill_timeout = lighter_timeout if lighter_timeout > 0 else 60.0
+        filled = await self.bot.lighter.wait_for_order_fill(
+            order_id=lighter_order_id,
+            check_interval=2.0,
+            timeout=fill_timeout
+        )
+
+        if not filled:
+            print(f"\n❌ Lighterクローズ約定タイムアウト")
+            print(f"   注文をキャンセル中...")
+            await self.bot.lighter.cancel_order(str(lighter_order_id))
+            print(f"⚠️  ポジションクローズ失敗 - MANUAL INTERVENTION REQUIRED!")
+            await self.notifier.send_error(
+                "CRITICAL: Lighter close order fill timeout",
+                f"Lighter size: {lighter_position_size}, Side: {lighter_close_side}"
+            )
+            return {
+                'success': False,
+                'error': 'Lighter close order fill timeout'
+            }
+
+        print(f"\n✅ Lighterクローズ約定確認！")
+
+        # STEP 3: Immediately place Paradex market order
+        print(f"\n{'='*60}")
+        print(f"STEP 3: Paradex成行注文（即時実行）")
+        print(f"{'='*60}")
+        print(f"   Side: {paradex_close_side} | Size: {paradex_position_size}")
+        print(f"   Type: Market order (スプレッド無視)")
+
+        paradex_result = await self.bot.paradex.place_market_order(
+            paradex_close_side,
+            paradex_position_size
+        )
 
         success = (
             not isinstance(paradex_result, Exception) and

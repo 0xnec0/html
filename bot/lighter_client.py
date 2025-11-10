@@ -614,6 +614,133 @@ class LighterClient:
             print(f"❌ Lighter funding rate error: {e}")
             return None
 
+    async def place_limit_order_with_spread_check(
+        self,
+        side: str,
+        size: float,
+        max_spread_pct: float = 0.03,
+        check_interval: float = 2.0,
+        timeout: float = 60.0
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Place limit order when spread is within acceptable range
+
+        Args:
+            side: Order side ('BUY' or 'SELL')
+            size: Order size
+            max_spread_pct: Maximum spread in percentage (e.g., 0.03 for 0.03%)
+            check_interval: How often to check spread in seconds
+            timeout: How long to wait for acceptable spread (0 = infinite)
+
+        Returns:
+            Order result if placed, None if timeout or error
+        """
+        print(f"\n📊 Lighter: スプレッドチェック付き指値注文")
+        print(f"   Side: {side} | Size: {size}")
+        print(f"   最大スプレッド: {max_spread_pct}%")
+        print(f"   タイムアウト: {timeout}秒" if timeout > 0 else "   タイムアウト: なし（無限）")
+
+        start_time = asyncio.get_event_loop().time()
+        check_count = 0
+
+        while True:
+            check_count += 1
+
+            # Get current bid/ask
+            bid_ask = await self.get_bid_ask()
+            if not bid_ask:
+                print(f"\r   [{check_count}] ❌ 価格取得失敗、リトライ中...", end='', flush=True)
+                await asyncio.sleep(check_interval)
+                continue
+
+            bid, ask = bid_ask
+            mid = (bid + ask) / 2
+            spread = abs(ask - bid)
+            spread_pct = (spread / mid) * 100
+
+            elapsed = asyncio.get_event_loop().time() - start_time
+            print(f"\r   [{check_count}] スプレッド: {spread_pct:.4f}% | 経過: {elapsed:.0f}秒", end='', flush=True)
+
+            # Check if spread is acceptable
+            if spread_pct <= max_spread_pct:
+                print(f"\n✅ スプレッド条件達成！ {spread_pct:.4f}% ≤ {max_spread_pct}%")
+                print(f"   Bid: ${bid:.4f} | Ask: ${ask:.4f}")
+
+                # Determine limit price based on side
+                # For BUY: use best bid (to get filled faster)
+                # For SELL: use best ask (to get filled faster)
+                if side.upper() == 'BUY':
+                    limit_price = bid
+                    print(f"   指値価格: ${limit_price:.4f} (Best Bid)")
+                else:
+                    limit_price = ask
+                    print(f"   指値価格: ${limit_price:.4f} (Best Ask)")
+
+                # Place limit order
+                result = await self.place_limit_order(side, size, limit_price)
+                return result
+
+            # Check timeout
+            if timeout > 0 and elapsed >= timeout:
+                print(f"\n⏰ タイムアウト: スプレッド条件未達成")
+                print(f"   現在のスプレッド: {spread_pct:.4f}% > {max_spread_pct}%")
+                return None
+
+            # Wait before next check
+            await asyncio.sleep(check_interval)
+
+    async def wait_for_order_fill(
+        self,
+        order_id: int,
+        check_interval: float = 2.0,
+        timeout: float = 60.0
+    ) -> bool:
+        """
+        Wait for order to be filled
+
+        Args:
+            order_id: Order ID to check
+            check_interval: How often to check in seconds
+            timeout: How long to wait (0 = infinite)
+
+        Returns:
+            True if order filled, False if timeout or error
+        """
+        print(f"\n⏳ Lighter: 約定待機中...")
+        print(f"   Order ID: {order_id}")
+        print(f"   チェック間隔: {check_interval}秒")
+        print(f"   タイムアウト: {timeout}秒" if timeout > 0 else "   タイムアウト: なし（無限）")
+
+        start_time = asyncio.get_event_loop().time()
+        check_count = 0
+
+        while True:
+            check_count += 1
+            elapsed = asyncio.get_event_loop().time() - start_time
+
+            # For Lighter, we'll check position to see if order was filled
+            # Since Lighter SDK doesn't have a direct order status query,
+            # we check if the position has changed
+            try:
+                position = await self.get_position()
+                if position and abs(position.get('size', 0)) > 0:
+                    print(f"\n✅ 約定確認！ポジション検出")
+                    print(f"   Position size: {position.get('size', 0)}")
+                    return True
+
+                print(f"\r   [{check_count}] 約定待ち... | 経過: {elapsed:.0f}秒", end='', flush=True)
+
+            except Exception as e:
+                print(f"\r   [{check_count}] チェック中... | 経過: {elapsed:.0f}秒", end='', flush=True)
+
+            # Check timeout
+            if timeout > 0 and elapsed >= timeout:
+                print(f"\n⏰ タイムアウト: 約定未確認")
+                return False
+
+            # Wait before next check
+            await asyncio.sleep(check_interval)
+
     async def close(self):
         """Close client session"""
         # Close aiohttp session if it exists

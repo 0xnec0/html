@@ -189,6 +189,19 @@ class Config:
         timeout = os.getenv('SPREAD_CHECK_TIMEOUT', self.config_data.get('spread', {}).get('check_timeout', '0'))
         return float(timeout)
 
+    # Lighter Limit Order Configuration
+    @property
+    def lighter_spread_max_pct(self) -> float:
+        """Maximum spread for Lighter limit orders in percentage"""
+        pct = os.getenv('LIGHTER_SPREAD_MAX_PCT', self.config_data.get('lighter_order', {}).get('spread_max_pct', '0.03'))
+        return float(pct)
+
+    @property
+    def lighter_order_timeout(self) -> float:
+        """Timeout for Lighter limit order fill in seconds (0 = infinite)"""
+        timeout = os.getenv('LIGHTER_ORDER_TIMEOUT', self.config_data.get('lighter_order', {}).get('order_timeout', '60'))
+        return float(timeout)
+
     def validate(self) -> bool:
         """
         Validate required configuration
