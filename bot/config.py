@@ -202,6 +202,12 @@ class Config:
         timeout = os.getenv('LIGHTER_ORDER_TIMEOUT', self.config_data.get('lighter_order', {}).get('order_timeout', '60'))
         return float(timeout)
 
+    @property
+    def lighter_use_websocket(self) -> bool:
+        """Use WebSocket for real-time Lighter updates"""
+        use_ws = os.getenv('LIGHTER_USE_WEBSOCKET', self.config_data.get('lighter_order', {}).get('use_websocket', 'true'))
+        return use_ws.lower() in ('true', '1', 'yes')
+
     def validate(self) -> bool:
         """
         Validate required configuration

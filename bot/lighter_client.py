@@ -74,6 +74,14 @@ class LighterClient:
         # HTTP session for REST API calls (will be created on first use)
         self._session = None
 
+        # WebSocket client and state
+        self._ws_client = None
+        self._ws_running = False
+        self._latest_orderbook = None  # Latest orderbook from WebSocket
+        self._latest_account = None  # Latest account from WebSocket
+        self._position_event = asyncio.Event()  # Event for position changes
+        self._initial_position_size = None  # Track initial position size
+
     async def _get_session(self):
         """Get or create aiohttp session"""
         if self._session is None or self._session.closed:
@@ -879,8 +887,258 @@ class LighterClient:
             # Wait before next check
             await asyncio.sleep(check_interval)
 
+    async def place_limit_order_with_spread_check_ws(
+        self,
+        side: str,
+        size: float,
+        max_spread_pct: float = 0.03,
+        timeout: float = 60.0
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Place limit order when spread is within acceptable range (WebSocket version)
+        Uses real-time WebSocket orderbook updates instead of polling
+
+        Args:
+            side: Order side ('BUY' or 'SELL')
+            size: Order size
+            max_spread_pct: Maximum spread in percentage (e.g., 0.03 for 0.03%)
+            timeout: How long to wait for acceptable spread (0 = infinite)
+
+        Returns:
+            Order result if placed, None if timeout or error
+        """
+        print(f"\n📊 Lighter: スプレッドチェック付き指値注文 (WebSocket)")
+        print(f"   Side: {side} | Size: {size}")
+        print(f"   最大スプレッド: {max_spread_pct}%")
+        print(f"   タイムアウト: {timeout}秒" if timeout > 0 else "   タイムアウト: なし（無限）")
+
+        # Ensure WebSocket is running
+        if not self._ws_running:
+            success = await self.start_websocket()
+            if not success:
+                print("⚠️  WebSocket起動失敗、ポーリング方式にフォールバック")
+                return await self.place_limit_order_with_spread_check(side, size, max_spread_pct, 2.0, timeout)
+
+        start_time = asyncio.get_event_loop().time()
+        check_count = 0
+
+        while True:
+            check_count += 1
+
+            # Get latest orderbook from WebSocket
+            if self._latest_orderbook:
+                bids = self._latest_orderbook.get('bids', [])
+                asks = self._latest_orderbook.get('asks', [])
+
+                if bids and asks:
+                    bid = float(bids[0]['price']) if bids[0].get('price') else None
+                    ask = float(asks[0]['price']) if asks[0].get('price') else None
+
+                    if bid and ask:
+                        mid = (bid + ask) / 2
+                        spread = abs(ask - bid)
+                        spread_pct = (spread / mid) * 100
+
+                        elapsed = asyncio.get_event_loop().time() - start_time
+                        print(f"\r   [{check_count}] スプレッド: {spread_pct:.4f}% | 経過: {elapsed:.0f}秒", end='', flush=True)
+
+                        # Check if spread is acceptable
+                        if spread_pct <= max_spread_pct:
+                            print(f"\n✅ スプレッド条件達成！ {spread_pct:.4f}% ≤ {max_spread_pct}%")
+                            print(f"   Bid: ${bid:.4f} | Ask: ${ask:.4f}")
+
+                            # Determine limit price
+                            if side.upper() == 'BUY':
+                                limit_price = bid
+                                print(f"   指値価格: ${limit_price:.4f} (Best Bid)")
+                            else:
+                                limit_price = ask
+                                print(f"   指値価格: ${limit_price:.4f} (Best Ask)")
+
+                            # Place limit order
+                            result = await self.place_limit_order(side, size, limit_price)
+                            return result
+
+            # Check timeout
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if timeout > 0 and elapsed >= timeout:
+                print(f"\n⏰ タイムアウト: スプレッド条件未達成")
+                return None
+
+            # Wait a bit before checking again
+            await asyncio.sleep(0.1)  # WebSocket is real-time, so short wait
+
+    async def wait_for_order_fill_ws(
+        self,
+        order_id: int,
+        initial_size: float = 0,
+        timeout: float = 60.0
+    ) -> bool:
+        """
+        Wait for order to be filled (WebSocket version)
+        Uses real-time account updates instead of polling
+
+        Args:
+            order_id: Order ID to check
+            initial_size: Initial position size before order
+            timeout: How long to wait (0 = infinite)
+
+        Returns:
+            True if order filled, False if timeout or error
+        """
+        print(f"\n⏳ Lighter: 約定待機中 (WebSocket)...")
+        print(f"   Order ID: {order_id}")
+        print(f"   初期サイズ: {initial_size}")
+        print(f"   タイムアウト: {timeout}秒" if timeout > 0 else "   タイムアウト: なし（無限）")
+
+        # Ensure WebSocket is running
+        if not self._ws_running:
+            success = await self.start_websocket()
+            if not success:
+                print("⚠️  WebSocket起動失敗、ポーリング方式にフォールバック")
+                return await self.wait_for_order_fill(order_id, 2.0, timeout)
+
+        # Set initial position size for tracking
+        self._initial_position_size = initial_size
+        self._position_event.clear()
+
+        start_time = asyncio.get_event_loop().time()
+
+        try:
+            # Wait for position event or timeout
+            while True:
+                # Check if position changed
+                if self._position_event.is_set():
+                    print(f"\n✅ 約定確認！(WebSocket)")
+                    return True
+
+                # Check timeout
+                elapsed = asyncio.get_event_loop().time() - start_time
+                if timeout > 0 and elapsed >= timeout:
+                    print(f"\n⏰ タイムアウト: 約定未確認 ({elapsed:.0f}秒)")
+                    return False
+
+                # Show progress
+                if int(elapsed) % 10 == 0:
+                    print(f"\r   約定待機中... | 経過: {elapsed:.0f}秒", end='', flush=True)
+
+                # Short wait before checking again
+                await asyncio.sleep(1.0)
+
+        finally:
+            # Reset tracking
+            self._initial_position_size = None
+            self._position_event.clear()
+
+    async def start_websocket(self):
+        """
+        Start WebSocket connection for real-time updates
+        Subscribes to orderbook and account updates
+        """
+        if not LIGHTER_SDK_AVAILABLE or not self.client:
+            print("⚠️  WebSocket requires Lighter SDK")
+            return False
+
+        try:
+            # Get market_id for this market
+            market_id = await self._get_market_id_from_api(self.market)
+            if market_id is None:
+                print(f"❌ Could not find market_id for {self.market}")
+                return False
+
+            print(f"\n🔌 Starting WebSocket connection...")
+            print(f"   Market ID: {market_id} ({self.market})")
+            print(f"   Account Index: {self.account_index}")
+
+            # Create WebSocket client
+            self._ws_client = lighter.WsClient(
+                order_book_ids=[market_id],
+                account_ids=[self.account_index],
+                on_order_book_update=self._on_orderbook_update,
+                on_account_update=self._on_account_update,
+            )
+
+            # Start WebSocket in background task
+            self._ws_running = True
+            asyncio.create_task(self._run_websocket())
+
+            print(f"✅ WebSocket connected")
+            return True
+
+        except Exception as e:
+            print(f"❌ WebSocket connection failed: {e}")
+            return False
+
+    async def _run_websocket(self):
+        """Background task to run WebSocket client"""
+        try:
+            await self._ws_client.run_async()
+        except Exception as e:
+            print(f"⚠️  WebSocket error: {e}")
+        finally:
+            self._ws_running = False
+
+    def _on_orderbook_update(self, market_id: int, orderbook: Dict[str, Any]):
+        """
+        Callback for orderbook updates from WebSocket
+
+        Args:
+            market_id: Market ID
+            orderbook: Orderbook data with bids and asks
+        """
+        self._latest_orderbook = orderbook
+        # Debug: print bid/ask spread occasionally
+        if hasattr(self, '_ob_update_count'):
+            self._ob_update_count += 1
+        else:
+            self._ob_update_count = 1
+
+        if self._ob_update_count % 100 == 0:  # Print every 100 updates
+            bids = orderbook.get('bids', [])
+            asks = orderbook.get('asks', [])
+            if bids and asks:
+                best_bid = float(bids[0]['price']) if bids[0].get('price') else 0
+                best_ask = float(asks[0]['price']) if asks[0].get('price') else 0
+                if best_bid and best_ask:
+                    spread = (best_ask - best_bid) / ((best_bid + best_ask) / 2) * 100
+                    print(f"\n📊 WS Update #{self._ob_update_count}: Bid ${best_bid:.4f} | Ask ${best_ask:.4f} | Spread {spread:.4f}%")
+
+    def _on_account_update(self, account_id: int, account: Dict[str, Any]):
+        """
+        Callback for account updates from WebSocket
+
+        Args:
+            account_id: Account ID
+            account: Account data with positions
+        """
+        self._latest_account = account
+
+        # Check for position changes
+        positions = account.get('positions', []) or account.get('perp_positions', [])
+        if positions:
+            for pos in positions:
+                size = abs(float(pos.get('size', 0) or pos.get('amount', 0)))
+                if size > 0:
+                    # Position detected - check if it changed
+                    if self._initial_position_size is not None:
+                        if size > self._initial_position_size:
+                            print(f"\n✅ WS: Position change detected! {self._initial_position_size} → {size}")
+                            self._position_event.set()  # Signal position change
+                    break
+
+    async def stop_websocket(self):
+        """Stop WebSocket connection"""
+        self._ws_running = False
+        if self._ws_client:
+            # WsClient will stop when run_async() completes
+            print("🔌 Stopping WebSocket...")
+            self._ws_client = None
+
     async def close(self):
         """Close client session"""
+        # Stop WebSocket first
+        await self.stop_websocket()
+
         # Close aiohttp session if it exists
         if self._session and not self._session.closed:
             await self._session.close()

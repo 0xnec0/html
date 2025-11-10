@@ -623,13 +623,25 @@ class DeltaNeutralStrategy:
         print(f"   最大スプレッド: {lighter_spread_max}%")
         print(f"   タイムアウト: {lighter_timeout}秒" if lighter_timeout > 0 else "   タイムアウト: なし")
 
-        lighter_result = await self.bot.lighter.place_limit_order_with_spread_check(
-            side=lighter_order_side,
-            size=lighter_position_size,
-            max_spread_pct=lighter_spread_max,
-            check_interval=2.0,
-            timeout=lighter_timeout
-        )
+        # Use WebSocket or polling based on config
+        use_websocket = self.bot.config.lighter_use_websocket
+        print(f"   接続方式: {'WebSocket' if use_websocket else 'ポーリング'}")
+
+        if use_websocket:
+            lighter_result = await self.bot.lighter.place_limit_order_with_spread_check_ws(
+                side=lighter_order_side,
+                size=lighter_position_size,
+                max_spread_pct=lighter_spread_max,
+                timeout=lighter_timeout
+            )
+        else:
+            lighter_result = await self.bot.lighter.place_limit_order_with_spread_check(
+                side=lighter_order_side,
+                size=lighter_position_size,
+                max_spread_pct=lighter_spread_max,
+                check_interval=2.0,
+                timeout=lighter_timeout
+            )
 
         if not lighter_result:
             print(f"\n❌ Lighter指値注文失敗")
@@ -646,12 +658,24 @@ class DeltaNeutralStrategy:
         print(f"STEP 2: Lighter約定待機")
         print(f"{'='*60}")
 
+        # Get initial position size for WebSocket tracking
+        initial_pos = await self.bot.lighter.get_position()
+        initial_size = abs(initial_pos.get('size', 0)) if initial_pos else 0
+
         fill_timeout = lighter_timeout if lighter_timeout > 0 else 60.0
-        filled = await self.bot.lighter.wait_for_order_fill(
-            order_id=lighter_order_id,
-            check_interval=2.0,
-            timeout=fill_timeout
-        )
+
+        if use_websocket:
+            filled = await self.bot.lighter.wait_for_order_fill_ws(
+                order_id=lighter_order_id,
+                initial_size=initial_size,
+                timeout=fill_timeout
+            )
+        else:
+            filled = await self.bot.lighter.wait_for_order_fill(
+                order_id=lighter_order_id,
+                check_interval=2.0,
+                timeout=fill_timeout
+            )
 
         if not filled:
             print(f"\n❌ Lighter約定タイムアウト")
@@ -1000,13 +1024,25 @@ class DeltaNeutralStrategy:
         print(f"   最大スプレッド: {lighter_spread_max}%")
         print(f"   タイムアウト: {lighter_timeout}秒" if lighter_timeout > 0 else "   タイムアウト: なし")
 
-        lighter_result = await self.bot.lighter.place_limit_order_with_spread_check(
-            side=lighter_close_side,
-            size=lighter_position_size,
-            max_spread_pct=lighter_spread_max,
-            check_interval=2.0,
-            timeout=lighter_timeout
-        )
+        # Use WebSocket or polling based on config
+        use_websocket = self.bot.config.lighter_use_websocket
+        print(f"   接続方式: {'WebSocket' if use_websocket else 'ポーリング'}")
+
+        if use_websocket:
+            lighter_result = await self.bot.lighter.place_limit_order_with_spread_check_ws(
+                side=lighter_close_side,
+                size=lighter_position_size,
+                max_spread_pct=lighter_spread_max,
+                timeout=lighter_timeout
+            )
+        else:
+            lighter_result = await self.bot.lighter.place_limit_order_with_spread_check(
+                side=lighter_close_side,
+                size=lighter_position_size,
+                max_spread_pct=lighter_spread_max,
+                check_interval=2.0,
+                timeout=lighter_timeout
+            )
 
         if not lighter_result:
             print(f"\n❌ Lighterクローズ指値注文失敗")
@@ -1028,12 +1064,24 @@ class DeltaNeutralStrategy:
         print(f"STEP 2: Lighter約定待機")
         print(f"{'='*60}")
 
+        # Get initial position size for WebSocket tracking
+        initial_pos = await self.bot.lighter.get_position()
+        initial_size = abs(initial_pos.get('size', 0)) if initial_pos else paradex_position_size  # Fallback to paradex size
+
         fill_timeout = lighter_timeout if lighter_timeout > 0 else 60.0
-        filled = await self.bot.lighter.wait_for_order_fill(
-            order_id=lighter_order_id,
-            check_interval=2.0,
-            timeout=fill_timeout
-        )
+
+        if use_websocket:
+            filled = await self.bot.lighter.wait_for_order_fill_ws(
+                order_id=lighter_order_id,
+                initial_size=initial_size,
+                timeout=fill_timeout
+            )
+        else:
+            filled = await self.bot.lighter.wait_for_order_fill(
+                order_id=lighter_order_id,
+                check_interval=2.0,
+                timeout=fill_timeout
+            )
 
         if not filled:
             print(f"\n❌ Lighterクローズ約定タイムアウト")
