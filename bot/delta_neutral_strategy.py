@@ -209,6 +209,92 @@ class DeltaNeutralStrategy:
 
         return balances
 
+    def _save_pending_order(self, order_id: str) -> None:
+        """
+        Save pending order ID to file for cleanup on next run
+
+        Args:
+            order_id: Order ID to save
+        """
+        try:
+            pending_orders_file = ".pending_lighter_orders.json"
+            pending_orders = []
+
+            # Load existing orders
+            if os.path.exists(pending_orders_file):
+                try:
+                    with open(pending_orders_file, 'r') as f:
+                        pending_orders = json.load(f)
+                except Exception:
+                    pending_orders = []
+
+            # Add new order if not already present
+            if order_id not in pending_orders:
+                pending_orders.append(order_id)
+
+            # Save back to file
+            with open(pending_orders_file, 'w') as f:
+                json.dump(pending_orders, f)
+
+        except Exception as e:
+            # Not critical - just log
+            pass
+
+    def _clear_pending_orders_file(self) -> None:
+        """Clear the pending orders file after successful fill"""
+        try:
+            pending_orders_file = ".pending_lighter_orders.json"
+            with open(pending_orders_file, 'w') as f:
+                json.dump([], f)
+        except Exception:
+            pass
+
+    async def _cancel_existing_pending_orders(self) -> None:
+        """
+        Cancel all existing pending orders on Lighter before placing new orders
+
+        This prevents order accumulation from previous runs or failed attempts.
+        Reads order IDs from .pending_orders.json if it exists.
+        """
+        try:
+            print(f"   未約定注文のクリーンアップを試行中...")
+
+            # Try to load pending orders from file
+            pending_orders_file = ".pending_lighter_orders.json"
+            if os.path.exists(pending_orders_file):
+                try:
+                    with open(pending_orders_file, 'r') as f:
+                        pending_orders = json.load(f)
+
+                    if pending_orders and len(pending_orders) > 0:
+                        print(f"   前回の未約定注文を発見: {len(pending_orders)}個")
+
+                        cancelled = 0
+                        for order_id in pending_orders:
+                            try:
+                                success = await self.bot.lighter.cancel_order(str(order_id))
+                                if success:
+                                    cancelled += 1
+                            except Exception:
+                                pass  # Order might already be filled/cancelled
+                            await asyncio.sleep(0.1)  # Rate limiting
+
+                        print(f"   ✓ {cancelled}個の注文をキャンセルしました")
+
+                        # Clear the file
+                        with open(pending_orders_file, 'w') as f:
+                            json.dump([], f)
+                    else:
+                        print(f"   ✓ 前回の未約定注文はありません")
+                except Exception as e:
+                    print(f"   ⚠️  ファイル読み込みエラー: {e}")
+            else:
+                print(f"   ✓ 前回の未約定注文はありません")
+
+        except Exception as e:
+            print(f"   ⚠️  クリーンアップ中にエラー: {e}")
+            # Continue anyway - not critical
+
     async def _cancel_all_pending_orders(self, all_order_ids: list, filled_order_id: str = None) -> None:
         """
         Cancel all pending orders except the filled one
@@ -371,12 +457,22 @@ class DeltaNeutralStrategy:
         current_order_id = None
         all_order_ids = []  # Track all placed orders for cleanup
 
+        # IMPORTANT: Cancel any pending orders from previous runs before starting
+        print(f"\n🧹 事前クリーンアップ: 既存の未約定注文を確認中...")
+        await self._cancel_existing_pending_orders()
+
         for attempt in range(1, max_attempts + 1):
             print(f"\n{'='*60}")
             print(f"🔄 試行 {attempt}/{max_attempts}")
             print(f"{'='*60}")
 
-            # Get latest bid/ask
+            # STEP 1: Cancel previous order from this loop (if exists)
+            if current_order_id:
+                print(f"   🗑️  前回の注文をキャンセル中: {current_order_id}")
+                await self.bot.lighter.cancel_order(str(current_order_id))
+                await asyncio.sleep(0.5)  # Wait for cancellation to process
+
+            # STEP 2: Get latest bid/ask
             bid_ask = await self.bot.lighter.get_bid_ask()
             if not bid_ask:
                 print("❌ 価格取得失敗")
@@ -391,12 +487,7 @@ class DeltaNeutralStrategy:
             print(f"   最新価格: Bid ${best_bid:.4f} | Ask ${best_ask:.4f}")
             print(f"   指値価格: ${limit_price:.4f} (Best Ask)")
 
-            # Cancel previous order if exists
-            if current_order_id:
-                print(f"   🗑️  前回の注文をキャンセル中...")
-                await self.bot.lighter.cancel_order(str(current_order_id))
-
-            # Place new limit order
+            # STEP 3: Place new limit order
             order_result = await self.bot.lighter.place_limit_order('SELL', size, limit_price)
 
             if not order_result:
@@ -407,6 +498,9 @@ class DeltaNeutralStrategy:
             current_order_id = order_result.get('order_id')
             tx_hash = order_result.get('tx_hash')
             all_order_ids.append(current_order_id)  # Track this order
+
+            # Save order ID to file for cleanup on next run
+            self._save_pending_order(current_order_id)
 
             print(f"   ✓ 注文送信完了")
             print(f"   Order ID: {current_order_id}")
@@ -427,6 +521,8 @@ class DeltaNeutralStrategy:
                     print(f"   ✅ 注文約定完了！")
                     # Cancel all other pending orders
                     await self._cancel_all_pending_orders(all_order_ids, current_order_id)
+                    # Clear pending orders file
+                    self._clear_pending_orders_file()
                     return {
                         **order_result,
                         'filled_size': size,
@@ -442,6 +538,8 @@ class DeltaNeutralStrategy:
                     print(f"   ✅ 注文約定完了！")
                     # Cancel all other pending orders
                     await self._cancel_all_pending_orders(all_order_ids, current_order_id)
+                    # Clear pending orders file
+                    self._clear_pending_orders_file()
                     return {
                         **order_result,
                         'filled_size': size,

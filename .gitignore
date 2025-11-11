@@ -34,6 +34,8 @@ config.json
 
 # Position tracking files
 .current_position.json
+.pending_lighter_orders.json
+.history.json
 
 # IDE
 .vscode/
