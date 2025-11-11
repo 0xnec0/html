@@ -998,6 +998,19 @@ class DeltaNeutralStrategy:
                 'error': 'Lighter limit order failed after max attempts'
             }
 
+        # CRITICAL: Verify Lighter order is actually FILLED before proceeding to Paradex
+        lighter_status = lighter_result.get('status', '')
+        if lighter_status != 'FILLED':
+            print(f"\n❌ Lighter注文が約定していません - ステータス: {lighter_status}")
+            await self.notifier.send_error(
+                "CRITICAL: Lighter order not filled during open",
+                f"Lighter order status: {lighter_status}, cannot proceed to Paradex"
+            )
+            return {
+                'success': False,
+                'error': f'Lighter order not filled (status: {lighter_status})'
+            }
+
         lighter_filled_size = lighter_result.get('filled_size', position_size)
         lighter_filled_price = lighter_result.get('filled_price', lighter_price)
 
@@ -1310,6 +1323,19 @@ class DeltaNeutralStrategy:
             return {
                 'success': False,
                 'error': 'Lighter limit order failed during close'
+            }
+
+        # CRITICAL: Verify Lighter order is actually FILLED before proceeding to Paradex
+        lighter_status = lighter_result.get('status', '')
+        if lighter_status != 'FILLED':
+            print(f"\n❌ Lighter注文が約定していません - ステータス: {lighter_status}")
+            await self.notifier.send_error(
+                "CRITICAL: Lighter order not filled during close",
+                f"Lighter order status: {lighter_status}, cannot proceed to Paradex"
+            )
+            return {
+                'success': False,
+                'error': f'Lighter order not filled (status: {lighter_status})'
             }
 
         lighter_filled_size = lighter_result.get('filled_size', position_size)
