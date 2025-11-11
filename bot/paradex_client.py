@@ -412,9 +412,23 @@ class ParadexClient:
                 try:
                     # Paradex SDK may have fetch_markets_summary or similar
                     markets = self.client.api_client.fetch_markets()
-                    if markets:
+
+                    # Validate response type
+                    if markets and isinstance(markets, (list, dict)):
+                        # Handle dict response with results array
+                        if isinstance(markets, dict) and 'results' in markets:
+                            markets = markets['results']
+
+                        # Ensure we have a list
+                        if not isinstance(markets, list):
+                            markets = [markets]
+
                         # Find our market
                         for market in markets:
+                            # Skip non-dict items
+                            if not isinstance(market, dict):
+                                continue
+
                             if market.get('symbol') == self.market or market.get('market') == self.market:
                                 funding_rate = float(market.get('funding_rate', 0))
 
@@ -430,11 +444,11 @@ class ParadexClient:
                 except Exception as sdk_error:
                     print(f"ℹ️  SDK funding rate query failed, falling back to REST API: {sdk_error}")
 
-            # Fallback to REST API - try multiple endpoints
+            # Fallback to REST API - try multiple endpoints with market parameter
             endpoints_to_try = [
+                f"/markets/summary?market={self.market}",  # Most reliable with market param
                 f"/markets/{self.market}",
-                "/markets/summary",
-                "/markets"
+                "/markets?market=ALL"  # Get all markets if specific query fails
             ]
 
             for endpoint in endpoints_to_try:
