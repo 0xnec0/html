@@ -302,9 +302,21 @@ class LighterClient:
             if not market_info:
                 raise ValueError(f"Market info not found for {self.market}")
 
+            # Debug: Dump entire market_info
+            print(f"🔍 Full market_info for {self.market}:")
+            import json
+            print(json.dumps(market_info, indent=2))
+
             # Extract decimal precision
             price_decimals = market_info.get('price_decimals', 0)
             size_decimals = market_info.get('size_decimals', 0)
+
+            # Debug: Show market info
+            print(f"🔍 Market Info for {self.market}:")
+            print(f"   price_decimals: {price_decimals}")
+            print(f"   size_decimals: {size_decimals}")
+            print(f"   min_order_size: {market_info.get('min_order_size', 'N/A')}")
+            print(f"   max_order_size: {market_info.get('max_order_size', 'N/A')}")
 
             # Convert to integers using decimal precision
             price_int = int(price * (10 ** price_decimals))
@@ -313,6 +325,10 @@ class LighterClient:
             print(f"ℹ️  Placing LIMIT order:")
             print(f"   Price: {price} → {price_int} (decimals: {price_decimals})")
             print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
+
+            # Check if base_amount_int is valid
+            if base_amount_int <= 0:
+                raise ValueError(f"Invalid base_amount_int: {base_amount_int}. Size: {size}, size_decimals: {size_decimals}")
 
             # Place true limit order using create_order with ORDER_TYPE_LIMIT
             tx, tx_hash, err = await self.client.create_order(
