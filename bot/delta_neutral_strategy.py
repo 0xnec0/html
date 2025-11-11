@@ -140,6 +140,8 @@ class DeltaNeutralStrategy:
                 'rate_diff_pct': 0,
                 'estimated_apy': 0,
                 'recommendation': 'NO_CHECK',
+                'paradex_side': 'BUY',  # Default to standard strategy
+                'lighter_side': 'SELL',
                 'reason': 'Funding rate check disabled in config'
             }
 
@@ -159,6 +161,8 @@ class DeltaNeutralStrategy:
                     'rate_diff_pct': 0,
                     'estimated_apy': 0,
                     'recommendation': 'DATA_UNAVAILABLE',
+                    'paradex_side': 'BUY',  # Default to standard strategy
+                    'lighter_side': 'SELL',
                     'reason': 'Could not fetch funding rates'
                 }
 
@@ -201,20 +205,25 @@ class DeltaNeutralStrategy:
                     'reason': f'Rate difference {rate_diff_pct:.4f}% below threshold {min_diff_pct}%'
                 }
 
-            # Determine position direction
+            # Determine position direction based on funding rates
+            # Rule: SHORT on the exchange with HIGHER funding rate (receive more)
+            #       LONG on the exchange with LOWER funding rate (pay less)
             if lighter_rate_hourly > paradex_rate_hourly:
                 # Lighter has higher rate → SHORT on Lighter, LONG on Paradex
-                recommendation = 'LIGHTER_SHORT'
+                paradex_side = 'BUY'
+                lighter_side = 'SELL'
+                recommendation = 'LIGHTER_SHORT_PARADEX_LONG'
                 reason = f'Lighter rate ({lighter_rate_hourly*100:.4f}%) > Paradex rate ({paradex_rate_hourly*100:.4f}%)'
             else:
-                # Paradex has higher rate → LONG on Lighter, SHORT on Paradex
-                # But our strategy is fixed (Paradex LONG + Lighter SHORT)
-                # So we reverse: if Paradex rate > Lighter rate, we still do our standard strategy
-                recommendation = 'LIGHTER_SHORT'  # Keep standard strategy
-                reason = f'Using standard strategy (Paradex LONG + Lighter SHORT)'
+                # Paradex has higher rate → SHORT on Paradex, LONG on Lighter
+                paradex_side = 'SELL'
+                lighter_side = 'BUY'
+                recommendation = 'PARADEX_SHORT_LIGHTER_LONG'
+                reason = f'Paradex rate ({paradex_rate_hourly*100:.4f}%) > Lighter rate ({lighter_rate_hourly*100:.4f}%)'
 
             print(f"   ✅ 機会あり: {recommendation}")
             print(f"   理由: {reason}")
+            print(f"   Paradex: {paradex_side}, Lighter: {lighter_side}")
 
             return {
                 'opportunity': True,
@@ -223,6 +232,8 @@ class DeltaNeutralStrategy:
                 'rate_diff_pct': rate_diff_pct,
                 'estimated_apy': estimated_apy,
                 'recommendation': recommendation,
+                'paradex_side': paradex_side,  # 'BUY' or 'SELL'
+                'lighter_side': lighter_side,  # 'BUY' or 'SELL'
                 'reason': reason
             }
 
@@ -237,6 +248,8 @@ class DeltaNeutralStrategy:
                 'rate_diff_pct': 0,
                 'estimated_apy': 0,
                 'recommendation': 'ERROR',
+                'paradex_side': 'BUY',  # Default to standard strategy
+                'lighter_side': 'SELL',
                 'reason': f'Error checking funding rates: {e}'
             }
 
@@ -542,11 +555,12 @@ class DeltaNeutralStrategy:
             await asyncio.sleep(timeout)
             return True
 
-    async def _place_lighter_limit_with_price_update(self, size: float, max_attempts: int = 12, wait_seconds: int = 5, use_websocket: bool = True) -> Optional[Dict[str, Any]]:
+    async def _place_lighter_limit_with_price_update(self, side: str, size: float, max_attempts: int = 12, wait_seconds: int = 5, use_websocket: bool = True) -> Optional[Dict[str, Any]]:
         """
         Place Lighter limit order with price updates until filled
 
         Args:
+            side: Order side ('BUY' or 'SELL')
             size: Order size
             max_attempts: Maximum number of attempts (default: 12)
             wait_seconds: Seconds to wait between attempts (default: 5)
@@ -556,6 +570,7 @@ class DeltaNeutralStrategy:
             Order result if filled, None if failed
         """
         print(f"\n📍 Lighter指値注文（価格自動更新）")
+        print(f"   注文方向: {side}")
         print(f"   目標サイズ: {size:.2f}")
         print(f"   最大試行回数: {max_attempts}")
         print(f"   更新間隔: {wait_seconds}秒")
@@ -573,7 +588,8 @@ class DeltaNeutralStrategy:
 
                     # Check if we already have the target position
                     # For SELL orders, we expect position size to be -size (short position)
-                    expected_position = -size
+                    # For BUY orders, we expect position size to be +size (long position)
+                    expected_position = -size if side == 'SELL' else size
                     if abs(initial_position_size - expected_position) < size * 0.1:  # Allow 10% tolerance
                         print(f"   ✅ すでに目標ポジションを保有しています")
                         print(f"   現在: {initial_position_size:.2f}, 期待値: {expected_position:.2f}")
@@ -616,14 +632,19 @@ class DeltaNeutralStrategy:
 
             best_bid, best_ask = bid_ask
 
-            # Use best ask for SELL limit order (most likely to fill)
-            limit_price = best_ask
+            # Use best ask for SELL (most likely to fill) or best bid for BUY
+            if side == 'SELL':
+                limit_price = best_ask
+                price_label = "Best Ask"
+            else:  # BUY
+                limit_price = best_bid
+                price_label = "Best Bid"
 
             print(f"   最新価格: Bid ${best_bid:.4f} | Ask ${best_ask:.4f}")
-            print(f"   指値価格: ${limit_price:.4f} (Best Ask)")
+            print(f"   指値価格: ${limit_price:.4f} ({price_label})")
 
             # STEP 3: Place new limit order
-            order_result = await self.bot.lighter.place_limit_order('SELL', size, limit_price)
+            order_result = await self.bot.lighter.place_limit_order(side, size, limit_price)
 
             if not order_result:
                 print("❌ 注文失敗")
@@ -644,8 +665,13 @@ class DeltaNeutralStrategy:
             # Check if filled using WebSocket or polling
             if use_websocket:
                 # Use WebSocket to detect fill
-                # For SELL orders, position size becomes negative
-                target_position_size = initial_position_size - size
+                # For SELL orders, position size becomes negative (subtract)
+                # For BUY orders, position size becomes positive (add)
+                if side == 'SELL':
+                    target_position_size = initial_position_size - size
+                else:  # BUY
+                    target_position_size = initial_position_size + size
+
                 filled = await self._wait_for_lighter_fill_via_websocket(
                     initial_position_size,
                     target_position_size,
@@ -930,6 +956,10 @@ class DeltaNeutralStrategy:
             print(f"   推定APY: {funding_check['estimated_apy']:.2f}%")
             print(f"   戦略: {funding_check['recommendation']}")
 
+        # Get position sides from funding rate check
+        paradex_side = funding_check.get('paradex_side', 'BUY')  # Default to BUY if not specified
+        lighter_side = funding_check.get('lighter_side', 'SELL')  # Default to SELL if not specified
+
         # Calculate position size
         if self.usd_amount:
             # Calculate position size for each exchange to match USD amount as closely as possible
@@ -964,18 +994,19 @@ class DeltaNeutralStrategy:
                 # Round down to integer
                 position_size = int(position_size)
 
-        print(f"\n📊 Executing delta neutral strategy (NEW FLOW)")
+        print(f"\n📊 Executing delta neutral strategy (FUNDING RATE BASED)")
         print(f"   Target: {position_size} units")
         print(f"   Strategy: Lighter指値 → Paradex成り行き")
-        print(f"   Paradex: BUY @ ${paradex_price:.4f}")
-        print(f"   Lighter: SELL @ ${lighter_price:.4f}")
+        print(f"   Paradex: {paradex_side} @ ${paradex_price:.4f}")
+        print(f"   Lighter: {lighter_side} @ ${lighter_price:.4f}")
 
         # Step 1: Place Lighter limit order with price updates
         print(f"\n{'='*60}")
-        print(f"STEP 1: Lighter指値注文（価格自動更新）")
+        print(f"STEP 1: Lighter指値注文（価格自動更新）- {lighter_side}")
         print(f"{'='*60}")
 
         lighter_result = await self._place_lighter_limit_with_price_update(
+            side=lighter_side,
             size=position_size,
             max_attempts=12,
             wait_seconds=5,
@@ -998,17 +1029,18 @@ class DeltaNeutralStrategy:
 
         # Step 2: Place Paradex market order
         print(f"\n{'='*60}")
-        print(f"STEP 2: Paradex成り行き注文")
+        print(f"STEP 2: Paradex成り行き注文 - {paradex_side}")
         print(f"{'='*60}")
-        print(f"   BUY {position_size} @ market")
+        print(f"   {paradex_side} {position_size} @ market")
 
-        paradex_result = await self.bot.paradex.place_market_order('BUY', position_size)
+        paradex_result = await self.bot.paradex.place_market_order(paradex_side, position_size)
 
         if not paradex_result or isinstance(paradex_result, Exception):
             print(f"\n⚠️  Paradex注文失敗 - Lighterポジションをクローズ中...")
 
-            # Close Lighter position
-            close_result = await self.bot.lighter.place_market_order('BUY', lighter_filled_size)
+            # Close Lighter position (opposite side of what was opened)
+            close_side = 'BUY' if lighter_side == 'SELL' else 'SELL'
+            close_result = await self.bot.lighter.place_market_order(close_side, lighter_filled_size)
 
             if close_result:
                 print(f"✅ Lighterポジションクローズ完了")
@@ -1166,6 +1198,8 @@ class DeltaNeutralStrategy:
                 'lighter_filled': lighter_total_filled,
                 'paradex_price': paradex_price,
                 'lighter_price': lighter_price,
+                'paradex_side': paradex_side,  # Save the side for closing
+                'lighter_side': lighter_side,  # Save the side for closing
                 'fill_ratio': min(paradex_total_filled/target_size, lighter_total_filled/target_size) * 100,
                 'funding_check': funding_check,  # Save funding rate analysis
             }
@@ -1211,9 +1245,11 @@ class DeltaNeutralStrategy:
 
     async def close_delta_neutral_position(self) -> Dict[str, Any]:
         """
-        Close delta neutral position:
-        - Paradex: Close LONG (SELL)
-        - Lighter: Close SHORT (BUY)
+        Close delta neutral position by placing orders opposite to the opening sides
+
+        The closing side is determined by what was opened:
+        - If opened with BUY, close with SELL
+        - If opened with SELL, close with BUY
 
         Returns:
             Results of position closing
@@ -1227,6 +1263,18 @@ class DeltaNeutralStrategy:
         print("="*60)
 
         position_size = self.current_position['size']
+
+        # Get the sides that were used when opening the position
+        # To close, we use the opposite side
+        opened_paradex_side = self.current_position.get('paradex_side', 'BUY')
+        opened_lighter_side = self.current_position.get('lighter_side', 'SELL')
+
+        # Determine closing sides (opposite of opening)
+        close_paradex_side = 'SELL' if opened_paradex_side == 'BUY' else 'BUY'
+        close_lighter_side = 'BUY' if opened_lighter_side == 'SELL' else 'SELL'
+
+        print(f"   オープン時: Paradex {opened_paradex_side}, Lighter {opened_lighter_side}")
+        print(f"   クローズ時: Paradex {close_paradex_side}, Lighter {close_lighter_side}")
 
         # Get and display current balances before closing
         print("\n💰 Checking current balances...")
@@ -1287,20 +1335,20 @@ class DeltaNeutralStrategy:
 
         print(f"\n📊 Closing positions...")
         if paradex_price:
-            print(f"   Paradex: SELL {position_size} @ ${paradex_price:.4f}")
+            print(f"   Paradex: {close_paradex_side} {position_size} @ ${paradex_price:.4f}")
         else:
-            print(f"   Paradex: SELL {position_size} @ (price unavailable)")
+            print(f"   Paradex: {close_paradex_side} {position_size} @ (price unavailable)")
 
         if lighter_price:
-            print(f"   Lighter: BUY {position_size} @ ${lighter_price:.4f}")
+            print(f"   Lighter: {close_lighter_side} {position_size} @ ${lighter_price:.4f}")
         else:
-            print(f"   Lighter: BUY {position_size} @ (price unavailable)")
+            print(f"   Lighter: {close_lighter_side} {position_size} @ (price unavailable)")
 
         # Execute both orders simultaneously with reduce_only=True
         # reduce_only ensures orders only close existing positions, not open new ones
         tasks = [
-            self.bot.paradex.place_market_order('SELL', position_size),
-            self.bot.lighter.place_market_order('BUY', position_size, reduce_only=True)
+            self.bot.paradex.place_market_order(close_paradex_side, position_size),
+            self.bot.lighter.place_market_order(close_lighter_side, position_size, reduce_only=True)
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
