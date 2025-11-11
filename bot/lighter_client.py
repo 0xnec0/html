@@ -227,18 +227,14 @@ class LighterClient:
                                         if best_bid > 0 and best_ask > 0:
                                             return (best_bid, best_ask)
                                     else:
-                                        # Orderbook is empty, use last_trade_price as fallback
+                                        # Orderbook is empty - cannot place orders without liquidity
                                         last_price = book.get('last_trade_price', 0)
                                         if last_price and float(last_price) > 0:
-                                            last_price = float(last_price)
-                                            # Estimate bid/ask with small spread (0.01%)
-                                            spread = last_price * 0.0001
-                                            estimated_bid = last_price - spread / 2
-                                            estimated_ask = last_price + spread / 2
-                                            print(f"⚠️  {symbol}: オーダーブック空 - 最終取引価格を使用 (${last_price:.4f})")
-                                            return (estimated_bid, estimated_ask)
+                                            print(f"⚠️  {symbol}: オーダーブック空 - 流動性待機中... (最終価格: ${float(last_price):.4f})")
                                         else:
-                                            print(f"❌ {symbol}: オーダーブックと最終取引価格がありません")
+                                            print(f"⚠️  {symbol}: オーダーブックと最終取引価格がありません")
+                                        # Return None to signal no liquidity - caller should retry
+                                        return None
 
                             print(f"❌ Market '{self.market}' not found!")
                         else:
@@ -302,6 +298,29 @@ class LighterClient:
             # Convert to integers using decimal precision
             price_int = int(price * (10 ** price_decimals))
             base_amount_int = int(size * (10 ** size_decimals))
+
+            # Debug: Print conversion
+            print(f"ℹ️  Order parameters:")
+            print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
+            print(f"   Price: {price} → {price_int} (decimals: {price_decimals})")
+            print(f"   Market ID: {market_id}")
+
+            # Validate minimum order size (Lighter typically requires minimum $10-20 worth)
+            order_value_usd = (base_amount_int / (10 ** size_decimals)) * (price_int / (10 ** price_decimals))
+            print(f"   Order value: ${order_value_usd:.2f}")
+
+            if base_amount_int <= 0:
+                raise ValueError(f"Invalid base_amount: {base_amount_int} (original size: {size})")
+            if price_int <= 0:
+                raise ValueError(f"Invalid price: {price_int} (original price: {price})")
+
+            # Check minimum order value
+            MIN_ORDER_VALUE_USD = 10.0  # Lighter's typical minimum
+            if order_value_usd < MIN_ORDER_VALUE_USD:
+                raise ValueError(
+                    f"Order value ${order_value_usd:.2f} is below minimum ${MIN_ORDER_VALUE_USD:.2f}. "
+                    f"Increase position size or check market configuration."
+                )
 
             # Place limit order using create_order
             tx, tx_hash, err = await self.client.create_order(
