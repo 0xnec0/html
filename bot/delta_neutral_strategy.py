@@ -659,23 +659,29 @@ class DeltaNeutralStrategy:
         print(f"{'='*60}")
 
         # Get initial position size for WebSocket tracking
+        print(f"\n📊 初期ポジション確認中...")
         initial_pos = await self.bot.lighter.get_position()
         initial_size = abs(initial_pos.get('size', 0)) if initial_pos else 0
+        print(f"   初期サイズ: {initial_size}")
 
         fill_timeout = lighter_timeout if lighter_timeout > 0 else 60.0
 
         if use_websocket:
+            print(f"   WebSocket方式で約定待機")
             filled = await self.bot.lighter.wait_for_order_fill_ws(
                 order_id=lighter_order_id,
                 initial_size=initial_size,
                 timeout=fill_timeout
             )
         else:
+            print(f"   ポーリング方式で約定待機")
             filled = await self.bot.lighter.wait_for_order_fill(
                 order_id=lighter_order_id,
                 check_interval=2.0,
                 timeout=fill_timeout
             )
+
+        print(f"\n🔍 約定結果チェック: filled = {filled}")
 
         if not filled:
             print(f"\n❌ Lighter約定タイムアウト")
@@ -688,6 +694,7 @@ class DeltaNeutralStrategy:
             }
 
         print(f"\n✅ Lighter約定確認！")
+        print(f"   → STEP 3（Paradex注文）に進みます...")
 
         # STEP 3: Immediately place Paradex market order
         print(f"\n{'='*60}")
@@ -696,18 +703,33 @@ class DeltaNeutralStrategy:
         print(f"   Side: {paradex_order_side} | Size: {paradex_position_size}")
         print(f"   Type: Market order (スプレッド無視)")
 
-        paradex_result = await self.bot.paradex.place_market_order(
-            paradex_order_side,
-            paradex_position_size
-        )
+        try:
+            print(f"\n📤 Paradex注文を送信中...")
+            paradex_result = await self.bot.paradex.place_market_order(
+                paradex_order_side,
+                paradex_position_size
+            )
+            print(f"📥 Paradex注文レスポンス: {paradex_result}")
+        except Exception as e:
+            print(f"\n❌ Paradex注文で例外発生: {e}")
+            import traceback
+            traceback.print_exc()
+            paradex_result = None
 
         # Check if both orders succeeded
         if not paradex_result or isinstance(paradex_result, Exception):
-            print(f"\n❌ Paradex注文失敗: {paradex_result}")
+            print(f"\n❌ Paradex注文失敗")
+            print(f"   Result: {paradex_result}")
+            print(f"   Type: {type(paradex_result)}")
+            print(f"\n⚠️  警告: Lighterポジションは開いたままです！")
+            print(f"   Lighter size: {lighter_position_size}")
+            print(f"   Lighter side: {lighter_order_side}")
             return {
                 'success': False,
                 'error': f'Paradex market order failed: {paradex_result}'
             }
+
+        print(f"\n✅ Paradex注文成功！")
 
         if not lighter_result or isinstance(lighter_result, Exception):
             print(f"\n❌ Lighter注文失敗: {lighter_result}")
