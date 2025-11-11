@@ -209,7 +209,7 @@ class LighterClient:
             url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
 
             try:
-                async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
                     if response.status == 200:
                         data = await response.json()
 
@@ -631,7 +631,7 @@ class LighterClient:
             # Fallback to REST API
             url = f"{self.base_url}/api/v1/fundings?market={self.market}&limit=1"
 
-            async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+            async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
                 if response.status == 200:
                     data = await response.json()
 
