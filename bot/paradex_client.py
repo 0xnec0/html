@@ -572,4 +572,8 @@ class ParadexClient:
         # Close aiohttp session if it exists
         if self._session and not self._session.closed:
             await self._session.close()
+            # Wait for the connector to finish closing
+            # This prevents "Unclosed connector" warnings
+            import asyncio
+            await asyncio.sleep(0.25)
         # Paradex SDK doesn't require explicit cleanup
