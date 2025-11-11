@@ -81,6 +81,12 @@ class Config:
         """Lighter market symbol"""
         return os.getenv('LIGHTER_MARKET', self.config_data.get('lighter', {}).get('market', 'DOGE'))
 
+    @property
+    def lighter_use_websocket(self) -> bool:
+        """Whether to use WebSocket for Lighter fill detection"""
+        use = os.getenv('LIGHTER_USE_WEBSOCKET', self.config_data.get('lighter', {}).get('use_websocket', 'true'))
+        return use.lower() in ('true', '1', 'yes')
+
     # Proxy Configuration
     @property
     def use_proxy(self) -> bool:

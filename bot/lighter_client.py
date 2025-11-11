@@ -5,6 +5,7 @@ Handles connection and trading operations on Lighter
 
 import asyncio
 import time
+import json
 from typing import Dict, Any, Optional
 from decimal import Decimal
 
@@ -576,6 +577,138 @@ class LighterClient:
         except Exception as e:
             print(f"❌ Lighter cancel error: {e}")
             return False
+
+    async def subscribe_to_account_updates(self, callback):
+        """
+        Subscribe to account updates via WebSocket
+
+        Args:
+            callback: Async function to call when account data is received
+                     Should accept a single parameter: account data dict
+        """
+        if not self.client:
+            print("❌ Lighter SDK required for WebSocket subscriptions")
+            return
+
+        try:
+            print(f"🔌 Subscribing to account updates for index {self.account_index}...")
+
+            # Subscribe to account updates using Lighter SDK
+            async for account_data in self.client.subscribe_account(
+                account_index=self.account_index
+            ):
+                try:
+                    # Parse account data
+                    if hasattr(account_data, 'to_dict'):
+                        account_dict = account_data.to_dict()
+                    elif isinstance(account_data, dict):
+                        account_dict = account_data
+                    else:
+                        account_dict = vars(account_data)
+
+                    # Debug: Print full account structure on first receive
+                    if not hasattr(self, '_account_structure_logged'):
+                        print(f"\n📊 Account Structure (first update):")
+                        print(json.dumps(account_dict, indent=2, default=str))
+                        self._account_structure_logged = True
+
+                    # Call the callback with account data
+                    await callback(account_dict)
+
+                except Exception as e:
+                    print(f"❌ Error processing account update: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+        except Exception as e:
+            print(f"❌ WebSocket subscription error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    async def get_position_from_account(self, account_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Extract position information from account data
+
+        Args:
+            account_data: Account data dict from WebSocket or API
+
+        Returns:
+            Position dict with size, entry_price, etc., or None if no position
+        """
+        try:
+            # Check for perp_positions key (most likely location)
+            if 'perp_positions' in account_data:
+                perp_positions = account_data['perp_positions']
+
+                # Get market_id for current market
+                market_id = await self._get_market_id_from_api(self.market)
+                if market_id is None:
+                    return None
+
+                # Find position for our market
+                if isinstance(perp_positions, dict):
+                    position = perp_positions.get(str(market_id))
+                    if position:
+                        return self._parse_position(position)
+
+                elif isinstance(perp_positions, list):
+                    for pos in perp_positions:
+                        if isinstance(pos, dict) and pos.get('market_id') == market_id:
+                            return self._parse_position(pos)
+
+            # Fallback: Check positions array (if it exists)
+            if 'positions' in account_data:
+                positions = account_data['positions']
+                market_id = await self._get_market_id_from_api(self.market)
+
+                if isinstance(positions, list):
+                    for pos in positions:
+                        if isinstance(pos, dict) and pos.get('market_id') == market_id:
+                            return self._parse_position(pos)
+                        elif isinstance(pos, int) and pos == market_id:
+                            # positions array contains only market IDs - need to fetch full data
+                            print("⚠️  positions array contains only market IDs, fetching full account data...")
+                            full_account = await self.get_account_balance()
+                            if full_account:
+                                return await self.get_position_from_account(full_account)
+
+            # No position found
+            return None
+
+        except Exception as e:
+            print(f"❌ Error extracting position from account data: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _parse_position(self, position_data: Any) -> Dict[str, Any]:
+        """
+        Parse position data into standard format
+
+        Args:
+            position_data: Raw position data (dict or object)
+
+        Returns:
+            Standardized position dict
+        """
+        if hasattr(position_data, 'to_dict'):
+            pos = position_data.to_dict()
+        elif isinstance(position_data, dict):
+            pos = position_data
+        else:
+            pos = vars(position_data)
+
+        # Extract key fields
+        size = float(pos.get('size', 0) or pos.get('base_amount', 0) or 0)
+        entry_price = float(pos.get('entry_price', 0) or pos.get('avg_entry_price', 0) or 0)
+        market_id = pos.get('market_id', None)
+
+        return {
+            'size': size,
+            'entry_price': entry_price,
+            'market_id': market_id,
+            'raw': pos  # Keep raw data for debugging
+        }
 
     async def close(self):
         """Close client session"""

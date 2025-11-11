@@ -209,7 +209,65 @@ class DeltaNeutralStrategy:
 
         return balances
 
-    async def _place_lighter_limit_with_price_update(self, size: float, max_attempts: int = 12, wait_seconds: int = 5) -> Optional[Dict[str, Any]]:
+    async def _wait_for_lighter_fill_via_websocket(self, initial_position_size: float, target_size: float, timeout: int = 30) -> bool:
+        """
+        Wait for order to fill by monitoring position changes via WebSocket
+
+        Args:
+            initial_position_size: Position size before order
+            target_size: Expected position size after fill
+            timeout: Maximum wait time in seconds
+
+        Returns:
+            True if filled, False if timeout
+        """
+        print(f"\n🔌 WebSocketで約定監視中...")
+        print(f"   初期ポジション: {initial_position_size:.2f}")
+        print(f"   目標ポジション: {target_size:.2f}")
+        print(f"   タイムアウト: {timeout}秒")
+
+        filled_event = asyncio.Event()
+        start_time = asyncio.get_event_loop().time()
+
+        async def on_account_update(account_data: dict):
+            """Callback for account updates"""
+            try:
+                position = await self.bot.lighter.get_position_from_account(account_data)
+                if position:
+                    current_size = position.get('size', 0)
+                    print(f"\r   📊 現在のポジション: {current_size:.2f} (目標: {target_size:.2f})", end='', flush=True)
+
+                    # Check if target reached
+                    if abs(current_size - target_size) < 0.01:  # Allow small tolerance
+                        print(f"\n   ✅ 約定確認！ポジション: {current_size:.2f}")
+                        filled_event.set()
+            except Exception as e:
+                print(f"\n   ❌ アカウント更新処理エラー: {e}")
+
+        # Start WebSocket subscription in background
+        websocket_task = asyncio.create_task(
+            self.bot.lighter.subscribe_to_account_updates(on_account_update)
+        )
+
+        try:
+            # Wait for fill or timeout
+            await asyncio.wait_for(filled_event.wait(), timeout=timeout)
+            print(f"\n   ✓ WebSocketで約定を検知しました！")
+            return True
+
+        except asyncio.TimeoutError:
+            print(f"\n   ⏰ タイムアウト: {timeout}秒以内に約定を確認できませんでした")
+            return False
+
+        finally:
+            # Cancel WebSocket task
+            websocket_task.cancel()
+            try:
+                await websocket_task
+            except asyncio.CancelledError:
+                pass
+
+    async def _place_lighter_limit_with_price_update(self, size: float, max_attempts: int = 12, wait_seconds: int = 5, use_websocket: bool = True) -> Optional[Dict[str, Any]]:
         """
         Place Lighter limit order with price updates until filled
 
@@ -217,6 +275,7 @@ class DeltaNeutralStrategy:
             size: Order size
             max_attempts: Maximum number of attempts (default: 12)
             wait_seconds: Seconds to wait between attempts (default: 5)
+            use_websocket: Use WebSocket for fill detection (default: True)
 
         Returns:
             Order result if filled, None if failed
@@ -225,6 +284,21 @@ class DeltaNeutralStrategy:
         print(f"   目標サイズ: {size:.2f}")
         print(f"   最大試行回数: {max_attempts}")
         print(f"   更新間隔: {wait_seconds}秒")
+        print(f"   WebSocket検知: {'有効' if use_websocket else '無効'}")
+
+        # Get initial position size (for WebSocket detection)
+        initial_position_size = 0.0
+        if use_websocket:
+            try:
+                account_data = await self.bot.lighter.get_account_balance()
+                if account_data:
+                    position = await self.bot.lighter.get_position_from_account(account_data)
+                    if position:
+                        initial_position_size = position.get('size', 0)
+                        print(f"   初期ポジション: {initial_position_size:.2f}")
+            except Exception as e:
+                print(f"   ⚠️  初期ポジション取得失敗: {e}")
+                use_websocket = False
 
         current_order_id = None
 
@@ -268,21 +342,38 @@ class DeltaNeutralStrategy:
             print(f"   Order ID: {current_order_id}")
             print(f"   TX Hash: {tx_hash}")
 
-            # Wait and check if filled
-            print(f"   ⏳ {wait_seconds}秒待機中...")
-            await asyncio.sleep(wait_seconds)
+            # Check if filled using WebSocket or polling
+            if use_websocket:
+                # Use WebSocket to detect fill
+                # For SELL orders, position size becomes negative
+                target_position_size = initial_position_size - size
+                filled = await self._wait_for_lighter_fill_via_websocket(
+                    initial_position_size,
+                    target_position_size,
+                    timeout=wait_seconds
+                )
 
-            # Check order status
-            # Note: For Lighter, if tx succeeded, we assume it's filled
-            # In a production environment, you'd query the order status from the API
-            if tx_hash:
-                print(f"   ✅ 注文約定完了！")
-                return {
-                    **order_result,
-                    'filled_size': size,
-                    'filled_price': limit_price,
-                    'status': 'FILLED'
-                }
+                if filled:
+                    print(f"   ✅ 注文約定完了！")
+                    return {
+                        **order_result,
+                        'filled_size': size,
+                        'filled_price': limit_price,
+                        'status': 'FILLED'
+                    }
+            else:
+                # Fallback: Wait and assume filled if tx succeeded
+                print(f"   ⏳ {wait_seconds}秒待機中...")
+                await asyncio.sleep(wait_seconds)
+
+                if tx_hash:
+                    print(f"   ✅ 注文約定完了！")
+                    return {
+                        **order_result,
+                        'filled_size': size,
+                        'filled_price': limit_price,
+                        'status': 'FILLED'
+                    }
 
             print(f"   ⚠️  約定未確認 - 価格を更新して再試行...")
 
@@ -543,7 +634,8 @@ class DeltaNeutralStrategy:
         lighter_result = await self._place_lighter_limit_with_price_update(
             size=position_size,
             max_attempts=12,
-            wait_seconds=5
+            wait_seconds=5,
+            use_websocket=self.bot.config.lighter_use_websocket
         )
 
         if not lighter_result:
