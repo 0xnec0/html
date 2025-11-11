@@ -737,19 +737,39 @@ class DeltaNeutralStrategy:
         print(f"   Lighter:  ${lighter_balance:.2f}")
         print(f"   Total:    ${paradex_balance + lighter_balance:.2f}")
 
+        # ===== スプレッド監視機能（コメントアウト） =====
         # Get spread monitoring configuration
-        max_spread_pct = self.bot.config.spread_max_pct
-        check_interval = self.bot.config.spread_check_interval
-        timeout = self.bot.config.spread_check_timeout
+        # max_spread_pct = self.bot.config.spread_max_pct
+        # check_interval = self.bot.config.spread_check_interval
+        # timeout = self.bot.config.spread_check_timeout
 
         # Wait for tight spread
-        price_result = await self._wait_for_tight_spread(max_spread_pct, check_interval, timeout)
+        # price_result = await self._wait_for_tight_spread(max_spread_pct, check_interval, timeout)
 
-        if price_result is None:
-            print("❌ Failed to achieve target spread within timeout")
-            return {'success': False, 'error': 'Spread timeout'}
+        # if price_result is None:
+        #     print("❌ Failed to achieve target spread within timeout")
+        #     return {'success': False, 'error': 'Spread timeout'}
 
-        paradex_price, lighter_price = price_result
+        # paradex_price, lighter_price = price_result
+        # ===== スプレッド監視機能ここまで =====
+
+        # 直接価格を取得（スプレッド監視なし）
+        print(f"\n💰 現在価格を取得中...")
+        paradex_bid_ask = await self.bot.paradex.get_bid_ask()
+        lighter_bid_ask = await self.bot.lighter.get_bid_ask()
+
+        if not paradex_bid_ask or not lighter_bid_ask:
+            print("❌ Failed to get prices")
+            return {'success': False, 'error': 'Price fetch failed'}
+
+        paradex_bid, paradex_ask = paradex_bid_ask
+        lighter_bid, lighter_ask = lighter_bid_ask
+
+        paradex_price = (paradex_bid + paradex_ask) / 2
+        lighter_price = (lighter_bid + lighter_ask) / 2
+
+        print(f"   Paradex: ${paradex_price:.4f} (Bid: ${paradex_bid:.4f}, Ask: ${paradex_ask:.4f})")
+        print(f"   Lighter: ${lighter_price:.4f} (Bid: ${lighter_bid:.4f}, Ask: ${lighter_ask:.4f})")
 
         if not paradex_price or not lighter_price:
             print("❌ Failed to get prices")
@@ -1064,30 +1084,52 @@ class DeltaNeutralStrategy:
         print(f"   Lighter:  ${lighter_balance:.2f}")
         print(f"   Total:    ${paradex_balance + lighter_balance:.2f}")
 
+        # ===== スプレッド監視機能（コメントアウト） =====
         # Get spread monitoring configuration
-        max_spread_pct = self.bot.config.spread_max_pct
-        check_interval = self.bot.config.spread_check_interval
-        timeout = self.bot.config.spread_check_timeout
+        # max_spread_pct = self.bot.config.spread_max_pct
+        # check_interval = self.bot.config.spread_check_interval
+        # timeout = self.bot.config.spread_check_timeout
 
         # Wait for tight spread before closing
-        price_result = await self._wait_for_tight_spread(max_spread_pct, check_interval, timeout)
+        # price_result = await self._wait_for_tight_spread(max_spread_pct, check_interval, timeout)
 
-        if price_result is None:
-            print("⚠️  Failed to achieve target spread within timeout for closing")
+        # if price_result is None:
+        #     print("⚠️  Failed to achieve target spread within timeout for closing")
+        #     print("   Using saved entry prices as reference...")
+        #     # Use entry prices if spread timeout
+        #     paradex_price = self.current_position.get('paradex_price', 0)
+        #     lighter_price = self.current_position.get('lighter_price', 0)
+        # else:
+        #     paradex_price, lighter_price = price_result
+
+        #     # Final check if prices are available
+        #     if not paradex_price or not lighter_price:
+        #         print("⚠️  Failed to fetch current prices for closing")
+        #         print("   Using saved entry prices as reference...")
+        #         # Use entry prices if current prices unavailable
+        #         paradex_price = self.current_position.get('paradex_price', 0)
+        #         lighter_price = self.current_position.get('lighter_price', 0)
+        # ===== スプレッド監視機能ここまで =====
+
+        # 直接価格を取得（スプレッド監視なし）
+        print(f"\n💰 クローズ用の現在価格を取得中...")
+        paradex_bid_ask = await self.bot.paradex.get_bid_ask()
+        lighter_bid_ask = await self.bot.lighter.get_bid_ask()
+
+        if not paradex_bid_ask or not lighter_bid_ask:
+            print("⚠️  Failed to fetch current prices for closing")
             print("   Using saved entry prices as reference...")
-            # Use entry prices if spread timeout
             paradex_price = self.current_position.get('paradex_price', 0)
             lighter_price = self.current_position.get('lighter_price', 0)
         else:
-            paradex_price, lighter_price = price_result
+            paradex_bid, paradex_ask = paradex_bid_ask
+            lighter_bid, lighter_ask = lighter_bid_ask
 
-            # Final check if prices are available
-            if not paradex_price or not lighter_price:
-                print("⚠️  Failed to fetch current prices for closing")
-                print("   Using saved entry prices as reference...")
-                # Use entry prices if current prices unavailable
-                paradex_price = self.current_position.get('paradex_price', 0)
-                lighter_price = self.current_position.get('lighter_price', 0)
+            paradex_price = (paradex_bid + paradex_ask) / 2
+            lighter_price = (lighter_bid + lighter_ask) / 2
+
+            print(f"   Paradex: ${paradex_price:.4f} (Bid: ${paradex_bid:.4f}, Ask: ${paradex_ask:.4f})")
+            print(f"   Lighter: ${lighter_price:.4f} (Bid: ${lighter_bid:.4f}, Ask: ${lighter_ask:.4f})")
 
         print(f"\n📊 Closing positions...")
         if paradex_price:
