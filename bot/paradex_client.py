@@ -410,9 +410,9 @@ class ParadexClient:
             # Try SDK first if available
             if self.client:
                 try:
-                    print(f"[DEBUG-SDK] Calling fetch_markets() via SDK...")
-                    # Paradex SDK may have fetch_markets_summary or similar
-                    markets = self.client.api_client.fetch_markets()
+                    print(f"[DEBUG-SDK] Calling fetch_markets_summary() via SDK...")
+                    # Use markets_summary for live data (not fetch_markets which returns config)
+                    markets = self.client.api_client.fetch_markets_summary({"market": self.market})
                     print(f"[DEBUG-SDK] Response type: {type(markets)}")
 
                     # Validate response type
