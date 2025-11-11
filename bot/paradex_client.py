@@ -453,9 +453,11 @@ class ParadexClient:
 
             for endpoint in endpoints_to_try:
                 try:
+                    print(f"[DEBUG] Trying endpoint: {endpoint}")
                     data = await self._make_request("GET", endpoint, signed=False)
 
                     if not data:
+                        print(f"[DEBUG] No data from {endpoint}")
                         continue
 
                     # Handle different response structures
@@ -467,22 +469,30 @@ class ParadexClient:
                             market_data = data
                         # Summary with results array
                         elif 'results' in data:
+                            print(f"[DEBUG] Found {len(data['results'])} markets in results")
                             for market in data['results']:
                                 if market.get('symbol') == self.market or market.get('market') == self.market:
                                     market_data = market
                                     break
                     elif isinstance(data, list):
                         # Array of markets
+                        print(f"[DEBUG] Found {len(data)} markets in array")
                         for market in data:
                             if market.get('symbol') == self.market or market.get('market') == self.market:
                                 market_data = market
                                 break
 
                     if market_data:
+                        print(f"[DEBUG] Found market data for {self.market}")
+                        print(f"[DEBUG] Available fields: {list(market_data.keys())}")
+
                         # Extract funding rate (field name may vary)
                         funding_rate = float(market_data.get('funding_rate',
                                             market_data.get('fundingRate',
                                             market_data.get('funding', 0))))
+
+                        print(f"[DEBUG] Extracted funding_rate: {funding_rate}")
+                        print(f"[DEBUG] Raw values - funding_rate: {market_data.get('funding_rate')}, fundingRate: {market_data.get('fundingRate')}, funding: {market_data.get('funding')}")
 
                         next_funding = market_data.get('next_funding_time',
                                                       market_data.get('nextFundingTime',
@@ -499,6 +509,7 @@ class ParadexClient:
 
                 except Exception as e:
                     # Try next endpoint
+                    print(f"[DEBUG] Error with {endpoint}: {e}")
                     continue
 
             print(f"⚠️  Could not find funding rate for {self.market} on Paradex")
