@@ -320,21 +320,21 @@ class LighterClient:
 
             # Convert to integers using decimal precision
             price_int = int(price * (10 ** price_decimals))
-
-            # IMPORTANT: base_amount in Lighter represents USD value, not size
-            # base_amount = size * price (in USD)
-            usd_amount = size * price
-            base_amount_int = int(usd_amount * (10 ** price_decimals))  # Use price_decimals for USD amount
+            base_amount_int = int(size * (10 ** size_decimals))
 
             print(f"ℹ️  Placing LIMIT order:")
             print(f"   Price: {price} → {price_int} (decimals: {price_decimals})")
-            print(f"   Size: {size} units")
-            print(f"   USD Amount: {usd_amount} → {base_amount_int} (decimals: {price_decimals})")
-            print(f"   Note: base_amount represents USD value (size * price)")
+            print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
 
             # Check if base_amount_int is valid
             if base_amount_int <= 0:
-                raise ValueError(f"Invalid base_amount_int: {base_amount_int}. Size: {size}, Price: {price}, USD: {usd_amount}")
+                raise ValueError(f"Invalid base_amount_int: {base_amount_int}. Size: {size}, size_decimals: {size_decimals}")
+
+            # Additional validation: check if size_decimals seems incorrect
+            if size_decimals == 0 and size < 1:
+                print(f"⚠️  WARNING: size_decimals is 0 but size ({size}) is fractional")
+                print(f"   This may cause base_amount_int to be 0 after int() conversion")
+                print(f"   Market info might be incorrect or size should be >= 1")
 
             # Place true limit order using create_order with ORDER_TYPE_LIMIT
             tx, tx_hash, err = await self.client.create_order(
@@ -459,17 +459,11 @@ class LighterClient:
             # Convert to integers using decimal precision
             # Lighter SDK requires integers (fixed-point representation)
             price_int = int(limit_price * (10 ** price_decimals))
-
-            # IMPORTANT: base_amount in Lighter represents USD value, not size
-            # base_amount = size * price (in USD)
-            usd_amount = size * limit_price
-            base_amount_int = int(usd_amount * (10 ** price_decimals))  # Use price_decimals for USD amount
+            base_amount_int = int(size * (10 ** size_decimals))
 
             print(f"ℹ️  Converting to integers:")
             print(f"   Price: {limit_price} → {price_int} (decimals: {price_decimals})")
-            print(f"   Size: {size} units")
-            print(f"   USD Amount: {usd_amount} → {base_amount_int} (decimals: {price_decimals})")
-            print(f"   Note: base_amount represents USD value (size * price)")
+            print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
 
             # Place market order using create_market_order
             tx, tx_hash, err = await self.client.create_market_order(
