@@ -302,21 +302,44 @@ class LighterClient:
             if not market_info:
                 raise ValueError(f"Market info not found for {self.market}")
 
-            # Debug: Dump entire market_info
-            print(f"🔍 Full market_info for {self.market}:")
-            import json
-            print(json.dumps(market_info, indent=2))
-
-            # Extract decimal precision
+            # Extract decimal precision and minimum order sizes
             price_decimals = market_info.get('price_decimals', 0)
             size_decimals = market_info.get('size_decimals', 0)
+            min_base_amount = float(market_info.get('min_base_amount', 0))
+            min_quote_amount = float(market_info.get('min_quote_amount', 0))
 
             # Debug: Show market info
             print(f"🔍 Market Info for {self.market}:")
             print(f"   price_decimals: {price_decimals}")
             print(f"   size_decimals: {size_decimals}")
-            print(f"   min_order_size: {market_info.get('min_order_size', 'N/A')}")
-            print(f"   max_order_size: {market_info.get('max_order_size', 'N/A')}")
+            print(f"   min_base_amount: {min_base_amount}")
+            print(f"   min_quote_amount: {min_quote_amount}")
+
+            # Adjust size to meet minimum requirements
+            original_size = size
+            quote_amount = size * price
+
+            # Check min_quote_amount (USD value)
+            if min_quote_amount > 0 and quote_amount < min_quote_amount:
+                # Calculate required size to meet min_quote_amount
+                required_size = min_quote_amount / price
+                # Round up to next valid increment based on size_decimals
+                size = round(required_size + (0.5 / (10 ** size_decimals)), size_decimals)
+                quote_amount = size * price
+                print(f"⚠️  Size adjusted to meet min_quote_amount:")
+                print(f"   Original: {original_size} units (${original_size * price:.2f})")
+                print(f"   Adjusted: {size} units (${quote_amount:.2f})")
+                print(f"   Min required: ${min_quote_amount}")
+
+            # Check min_base_amount (this is in the same units as size, accounting for decimals)
+            base_amount_real = size  # Real value before integer conversion
+            if min_base_amount > 0 and base_amount_real < min_base_amount:
+                size = min_base_amount
+                quote_amount = size * price
+                print(f"⚠️  Size adjusted to meet min_base_amount:")
+                print(f"   Original: {original_size}")
+                print(f"   Adjusted: {size}")
+                print(f"   Min required: {min_base_amount}")
 
             # Convert to integers using decimal precision
             price_int = int(price * (10 ** price_decimals))
@@ -325,16 +348,11 @@ class LighterClient:
             print(f"ℹ️  Placing LIMIT order:")
             print(f"   Price: {price} → {price_int} (decimals: {price_decimals})")
             print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
+            print(f"   Quote Amount: ${quote_amount:.2f}")
 
             # Check if base_amount_int is valid
             if base_amount_int <= 0:
                 raise ValueError(f"Invalid base_amount_int: {base_amount_int}. Size: {size}, size_decimals: {size_decimals}")
-
-            # Additional validation: check if size_decimals seems incorrect
-            if size_decimals == 0 and size < 1:
-                print(f"⚠️  WARNING: size_decimals is 0 but size ({size}) is fractional")
-                print(f"   This may cause base_amount_int to be 0 after int() conversion")
-                print(f"   Market info might be incorrect or size should be >= 1")
 
             # Place true limit order using create_order with ORDER_TYPE_LIMIT
             tx, tx_hash, err = await self.client.create_order(
@@ -452,9 +470,34 @@ class LighterClient:
             if not market_info:
                 raise ValueError(f"Market info not found for {self.market}")
 
-            # Extract decimal precision
+            # Extract decimal precision and minimum order sizes
             price_decimals = market_info.get('price_decimals', 0)
             size_decimals = market_info.get('size_decimals', 0)
+            min_base_amount = float(market_info.get('min_base_amount', 0))
+            min_quote_amount = float(market_info.get('min_quote_amount', 0))
+
+            # Adjust size to meet minimum requirements
+            original_size = size
+            quote_amount = size * limit_price
+
+            # Check min_quote_amount (USD value)
+            if min_quote_amount > 0 and quote_amount < min_quote_amount:
+                # Calculate required size to meet min_quote_amount
+                required_size = min_quote_amount / limit_price
+                # Round up to next valid increment based on size_decimals
+                size = round(required_size + (0.5 / (10 ** size_decimals)), size_decimals)
+                quote_amount = size * limit_price
+                print(f"⚠️  Size adjusted to meet min_quote_amount:")
+                print(f"   Original: {original_size} units (${original_size * limit_price:.2f})")
+                print(f"   Adjusted: {size} units (${quote_amount:.2f})")
+
+            # Check min_base_amount
+            if min_base_amount > 0 and size < min_base_amount:
+                size = min_base_amount
+                quote_amount = size * limit_price
+                print(f"⚠️  Size adjusted to meet min_base_amount:")
+                print(f"   Original: {original_size}")
+                print(f"   Adjusted: {size}")
 
             # Convert to integers using decimal precision
             # Lighter SDK requires integers (fixed-point representation)
@@ -464,6 +507,7 @@ class LighterClient:
             print(f"ℹ️  Converting to integers:")
             print(f"   Price: {limit_price} → {price_int} (decimals: {price_decimals})")
             print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
+            print(f"   Quote Amount: ${quote_amount:.2f}")
 
             # Place market order using create_market_order
             tx, tx_hash, err = await self.client.create_market_order(
