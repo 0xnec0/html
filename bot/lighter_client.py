@@ -201,7 +201,9 @@ class LighterClient:
         try:
             import aiohttp
             session = await self._get_session()
-            url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
+
+            # Use correct endpoint: /markets/{symbol} instead of /orderBookDetails
+            url = f"{self.base_url}/markets/{self.market}"
 
             try:
                 async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
@@ -215,51 +217,38 @@ class LighterClient:
                             print(f"   Response type: {type(data)}")
                             if isinstance(data, dict):
                                 print(f"   Keys: {list(data.keys())}")
-                                if 'order_book_details' in data:
-                                    print(f"   order_book_details count: {len(data['order_book_details'])}")
-                                    if len(data['order_book_details']) > 0:
-                                        first = data['order_book_details'][0]
-                                        print(f"   First market keys: {list(first.keys())}")
-                                        print(f"   First market symbol: {first.get('symbol')}")
                             self._api_structure_logged = True
 
-                        # Extract bid/ask from orderBookDetails response
-                        if isinstance(data, dict) and 'order_book_details' in data:
-                            for book in data['order_book_details']:
-                                symbol = book.get('symbol', '')
+                        # Extract bid/ask from market response
+                        # Response format: {"asks": [[price, size], ...], "bids": [[price, size], ...], ...}
+                        if isinstance(data, dict):
+                            asks = data.get('asks', [])
+                            bids = data.get('bids', [])
 
-                                if symbol.upper() == self.market.upper():
-                                    # DEBUG: Market found
-                                    if not hasattr(self, '_market_found_logged'):
-                                        print(f"✓ Found market: {symbol}")
-                                        print(f"   Market keys: {list(book.keys())}")
-                                        self._market_found_logged = True
-                                    # Get best bid (highest buy price) and best ask (lowest sell price)
-                                    asks = book.get('asks', [])
-                                    bids = book.get('bids', [])
+                            # DEBUG: Market found
+                            if not hasattr(self, '_market_found_logged'):
+                                print(f"✓ Found market: {self.market}")
+                                print(f"   Asks count: {len(asks)}")
+                                print(f"   Bids count: {len(bids)}")
+                                self._market_found_logged = True
 
-                                    if asks and bids and len(asks) > 0 and len(bids) > 0:
-                                        # asks[0] = [price, size]
-                                        # bids[0] = [price, size]
-                                        best_ask = float(asks[0][0])
-                                        best_bid = float(bids[0][0])
+                            if asks and bids and len(asks) > 0 and len(bids) > 0:
+                                # asks[0] = [price, size]
+                                # bids[0] = [price, size]
+                                best_ask = float(asks[0][0])
+                                best_bid = float(bids[0][0])
 
-                                        if best_bid > 0 and best_ask > 0:
-                                            return (best_bid, best_ask)
-                                    else:
-                                        # Orderbook is empty - cannot place orders without liquidity
-                                        last_price = book.get('last_trade_price', 0)
-                                        if last_price and float(last_price) > 0:
-                                            print(f"⚠️  {symbol}: オーダーブック空 - 流動性待機中... (最終価格: ${float(last_price):.4f})")
-                                        else:
-                                            print(f"⚠️  {symbol}: オーダーブックと最終取引価格がありません")
-                                        # Return None to signal no liquidity - caller should retry
-                                        return None
-
-                            # DEBUG: Show available markets if target not found
-                            available = [book.get('symbol') for book in data['order_book_details']]
-                            print(f"❌ Market '{self.market}' not found!")
-                            print(f"   Available markets: {', '.join(available[:10])}")
+                                if best_bid > 0 and best_ask > 0:
+                                    return (best_bid, best_ask)
+                            else:
+                                # Orderbook is empty - cannot place orders without liquidity
+                                last_price = data.get('last_trade_price', 0)
+                                if last_price and float(last_price) > 0:
+                                    print(f"⚠️  {self.market}: オーダーブック空 - 流動性待機中... (最終価格: ${float(last_price):.4f})")
+                                else:
+                                    print(f"⚠️  {self.market}: オーダーブックと最終取引価格がありません")
+                                # Return None to signal no liquidity - caller should retry
+                                return None
                         else:
                             print(f"❌ Invalid response structure")
                         return None
