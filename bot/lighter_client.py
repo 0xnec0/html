@@ -336,11 +336,7 @@ class LighterClient:
                     f"Increase position size or check market configuration."
                 )
 
-            # Calculate expiry time (24 hours from now)
-            expiry_time = int(time.time()) + 86400  # 24 hours in seconds
-
             print(f"   Reduce only: {reduce_only}")
-            print(f"   Expiry time: {expiry_time} ({time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(expiry_time))})")
 
             # Place limit order using create_order
             tx, tx_hash, err = await self.client.create_order(
@@ -353,7 +349,6 @@ class LighterClient:
                 time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
                 reduce_only=reduce_only,
                 trigger_price=0,
-                expiry_time=expiry_time,
             )
 
             if err is not None:
@@ -473,11 +468,7 @@ class LighterClient:
             print(f"   Price: {limit_price} → {price_int} (decimals: {price_decimals})")
             print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
 
-            # Calculate expiry time (1 hour from now for market orders)
-            expiry_time = int(time.time()) + 3600  # 1 hour in seconds
-
             print(f"   Reduce only: {reduce_only}")
-            print(f"   Expiry time: {expiry_time} ({time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(expiry_time))})")
 
             # Place market order using create_order with ORDER_TYPE_MARKET
             tx, tx_hash, err = await self.client.create_order(
@@ -490,7 +481,6 @@ class LighterClient:
                 time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,
                 reduce_only=reduce_only,
                 trigger_price=0,
-                expiry_time=expiry_time,
             )
 
             if err is not None:
