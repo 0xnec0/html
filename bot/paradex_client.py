@@ -410,27 +410,43 @@ class ParadexClient:
             # Try SDK first if available
             if self.client:
                 try:
+                    print(f"[DEBUG-SDK] Calling fetch_markets() via SDK...")
                     # Paradex SDK may have fetch_markets_summary or similar
                     markets = self.client.api_client.fetch_markets()
+                    print(f"[DEBUG-SDK] Response type: {type(markets)}")
 
                     # Validate response type
                     if markets and isinstance(markets, (list, dict)):
+                        print(f"[DEBUG-SDK] Valid response type received")
+
                         # Handle dict response with results array
                         if isinstance(markets, dict) and 'results' in markets:
+                            print(f"[DEBUG-SDK] Found 'results' key in dict response")
                             markets = markets['results']
 
                         # Ensure we have a list
                         if not isinstance(markets, list):
                             markets = [markets]
 
+                        print(f"[DEBUG-SDK] Processing {len(markets)} markets")
+
                         # Find our market
                         for market in markets:
                             # Skip non-dict items
                             if not isinstance(market, dict):
+                                print(f"[DEBUG-SDK] Skipping non-dict item: {type(market)}")
                                 continue
 
-                            if market.get('symbol') == self.market or market.get('market') == self.market:
+                            market_symbol = market.get('symbol') or market.get('market')
+                            print(f"[DEBUG-SDK] Checking market: {market_symbol}")
+
+                            if market_symbol == self.market:
+                                print(f"[DEBUG-SDK] Found target market: {self.market}")
+                                print(f"[DEBUG-SDK] Available fields: {list(market.keys())}")
+
                                 funding_rate = float(market.get('funding_rate', 0))
+                                print(f"[DEBUG-SDK] Extracted funding_rate: {funding_rate}")
+                                print(f"[DEBUG-SDK] Raw value - funding_rate: {market.get('funding_rate')}")
 
                                 # Paradex uses 8-hour funding periods (3 times per day)
                                 return {
@@ -441,8 +457,12 @@ class ParadexClient:
                                     'market': self.market,
                                     'source': 'SDK'
                                 }
+
+                        print(f"[DEBUG-SDK] Target market {self.market} not found in SDK response")
                 except Exception as sdk_error:
                     print(f"ℹ️  SDK funding rate query failed, falling back to REST API: {sdk_error}")
+                    import traceback
+                    traceback.print_exc()
 
             # Fallback to REST API - try multiple endpoints with market parameter
             endpoints_to_try = [
