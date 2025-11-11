@@ -547,7 +547,7 @@ class DeltaNeutralStrategy:
             await asyncio.sleep(timeout)
             return True
 
-    async def _place_lighter_limit_with_price_update(self, side: str, size: float, max_attempts: int = 12, wait_seconds: int = 5, use_websocket: bool = True) -> Optional[Dict[str, Any]]:
+    async def _place_lighter_limit_with_price_update(self, side: str, size: float, max_attempts: int = 12, wait_seconds: int = 5, use_websocket: bool = True, reduce_only: bool = False) -> Optional[Dict[str, Any]]:
         """
         Place Lighter limit order with price updates until filled
 
@@ -557,6 +557,7 @@ class DeltaNeutralStrategy:
             max_attempts: Maximum number of attempts (default: 12)
             wait_seconds: Seconds to wait between attempts (default: 5)
             use_websocket: Use WebSocket for fill detection (default: True)
+            reduce_only: If True, order only closes existing position (default: False)
 
         Returns:
             Order result if filled, None if failed
@@ -567,6 +568,7 @@ class DeltaNeutralStrategy:
         print(f"   最大試行回数: {max_attempts}")
         print(f"   更新間隔: {wait_seconds}秒")
         print(f"   WebSocket検知: {'有効' if use_websocket else '無効'}")
+        print(f"   Reduce Only: {'有効' if reduce_only else '無効'}")
 
         # Get initial position size (for WebSocket detection and existing position check)
         initial_position_size = 0.0
@@ -636,7 +638,7 @@ class DeltaNeutralStrategy:
             print(f"   指値価格: ${limit_price:.4f} ({price_label})")
 
             # STEP 3: Place new limit order
-            order_result = await self.bot.lighter.place_limit_order(side, size, limit_price)
+            order_result = await self.bot.lighter.place_limit_order(side, size, limit_price, reduce_only=reduce_only)
 
             if not order_result:
                 print("❌ 注文失敗")
@@ -1326,56 +1328,109 @@ class DeltaNeutralStrategy:
             print(f"   Lighter: ${lighter_price:.4f} (Bid: ${lighter_bid:.4f}, Ask: ${lighter_ask:.4f})")
 
         print(f"\n📊 Closing positions...")
-        if paradex_price:
-            print(f"   Paradex: {close_paradex_side} {position_size} @ ${paradex_price:.4f}")
-        else:
-            print(f"   Paradex: {close_paradex_side} {position_size} @ (price unavailable)")
+        print(f"   Target size: {position_size}")
 
-        if lighter_price:
-            print(f"   Lighter: {close_lighter_side} {position_size} @ ${lighter_price:.4f}")
-        else:
-            print(f"   Lighter: {close_lighter_side} {position_size} @ (price unavailable)")
+        # Step 1: Place Lighter limit order with price updates (with reduce_only=True)
+        print(f"\n{'='*60}")
+        print(f"STEP 1: Lighter指値注文（クローズ）- {close_lighter_side}")
+        print(f"{'='*60}")
 
-        # Execute both orders simultaneously with reduce_only=True
-        # reduce_only ensures orders only close existing positions, not open new ones
-        tasks = [
-            self.bot.paradex.place_market_order(close_paradex_side, position_size),
-            self.bot.lighter.place_market_order(close_lighter_side, position_size, reduce_only=True)
-        ]
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        paradex_result = results[0]
-        lighter_result = results[1]
-
-        success = (
-            not isinstance(paradex_result, Exception) and
-            not isinstance(lighter_result, Exception)
+        lighter_result = await self._place_lighter_limit_with_price_update(
+            side=close_lighter_side,
+            size=position_size,
+            max_attempts=12,
+            wait_seconds=5,
+            use_websocket=self.bot.config.lighter_use_websocket,
+            reduce_only=True  # Important: only close existing position
         )
 
-        # Calculate P&L
+        if not lighter_result:
+            print(f"\n❌ Lighter注文失敗 - ポジションクローズ失敗")
+            await self.notifier.send_error(
+                "Failed to close Lighter position",
+                f"Lighter {close_lighter_side} order failed after max attempts"
+            )
+            return {
+                'success': False,
+                'error': 'Lighter limit order failed during close'
+            }
+
+        lighter_filled_size = lighter_result.get('filled_size', position_size)
+        lighter_filled_price = lighter_result.get('filled_price', lighter_price)
+
+        print(f"\n✅ Lighter約定完了!")
+        print(f"   約定サイズ: {lighter_filled_size:.2f}")
+        print(f"   約定価格: ${lighter_filled_price:.4f}")
+
+        # Step 2: Place Paradex market order to close
+        print(f"\n{'='*60}")
+        print(f"STEP 2: Paradex成り行き注文（クローズ）- {close_paradex_side}")
+        print(f"{'='*60}")
+        print(f"   {close_paradex_side} {position_size} @ market")
+
+        paradex_result = await self.bot.paradex.place_market_order(close_paradex_side, position_size)
+
+        if not paradex_result or isinstance(paradex_result, Exception):
+            print(f"\n❌ Paradex注文失敗 - クローズ完了できませんでした")
+            await self.notifier.send_error(
+                "CRITICAL: Failed to close Paradex position",
+                f"Lighter closed successfully but Paradex failed: {paradex_result}"
+            )
+            return {
+                'success': False,
+                'error': 'Paradex market order failed during close',
+                'paradex': paradex_result,
+                'lighter': lighter_result
+            }
+
+        paradex_filled_size = await self._verify_filled_size(paradex_result, position_size, "Paradex")
+
+        print(f"\n✅ Paradex約定完了!")
+        print(f"   約定サイズ: {paradex_filled_size:.2f}")
+
+        # Calculate P&L using actual filled prices and sizes
+        success = True
         if success:
             entry_paradex_price = self.current_position['paradex_price']
             entry_lighter_price = self.current_position['lighter_price']
 
-            paradex_pnl = (paradex_price - entry_paradex_price) * position_size
-            lighter_pnl = (entry_lighter_price - lighter_price) * position_size
+            # Use actual filled prices for exit
+            exit_paradex_price = paradex_price if paradex_price else entry_paradex_price
+            exit_lighter_price = lighter_filled_price
+
+            # Calculate P&L based on position direction
+            if opened_paradex_side == 'BUY':
+                # LONG position: profit = (exit - entry) * size
+                paradex_pnl = (exit_paradex_price - entry_paradex_price) * paradex_filled_size
+            else:
+                # SHORT position: profit = (entry - exit) * size
+                paradex_pnl = (entry_paradex_price - exit_paradex_price) * paradex_filled_size
+
+            if opened_lighter_side == 'BUY':
+                # LONG position: profit = (exit - entry) * size
+                lighter_pnl = (exit_lighter_price - entry_lighter_price) * lighter_filled_size
+            else:
+                # SHORT position: profit = (entry - exit) * size
+                lighter_pnl = (entry_lighter_price - exit_lighter_price) * lighter_filled_size
+
             total_pnl = paradex_pnl + lighter_pnl
 
             print(f"\n💵 P&L Summary:")
-            print(f"   Paradex (LONG): ${paradex_pnl:.2f}")
-            print(f"   Lighter (SHORT): ${lighter_pnl:.2f}")
+            print(f"   Paradex ({opened_paradex_side}): ${paradex_pnl:.2f}")
+            print(f"   Lighter ({opened_lighter_side}): ${lighter_pnl:.2f}")
             print(f"   Total P&L: ${total_pnl:.2f}")
 
-            # Save to history
+            # Save to history with actual filled prices and sizes
             trade_data = {
                 'entry_time': self.current_position['timestamp'],
                 'exit_time': datetime.now().isoformat(),
                 'size': position_size,
+                'paradex_filled_size': paradex_filled_size,
+                'lighter_filled_size': lighter_filled_size,
                 'paradex_entry_price': entry_paradex_price,
-                'paradex_exit_price': paradex_price if paradex_price else 0,
+                'paradex_exit_price': exit_paradex_price,
                 'lighter_entry_price': entry_lighter_price,
-                'lighter_exit_price': lighter_price if lighter_price else 0,
+                'lighter_exit_price': exit_lighter_price,
                 'paradex_pnl': paradex_pnl,
                 'lighter_pnl': lighter_pnl,
                 'total_pnl': total_pnl,
