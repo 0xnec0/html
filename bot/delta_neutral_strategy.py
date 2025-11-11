@@ -1509,8 +1509,8 @@ class DeltaNeutralStrategy:
                 open_result = await self.open_delta_neutral_position()
 
                 if not open_result['success']:
-                    print("⚠️  Failed to open position, retrying in 5 minutes...")
-                    await asyncio.sleep(300)
+                    print("⚠️  Failed to open position, retrying in 10 seconds...")
+                    await asyncio.sleep(10)
                     continue
 
                 # Random hold time between 2-3 hours
