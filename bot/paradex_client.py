@@ -235,7 +235,6 @@ class ParadexClient:
                 summary = await self._make_request("GET", f"/markets/summary?market={self.market}")
 
             if not summary:
-                print(f"[DEBUG-Paradex] summary is None")
                 return None
 
             # Find market
@@ -256,10 +255,7 @@ class ParadexClient:
 
                     if bid > 0 and ask > 0:
                         return (bid, ask)
-                    else:
-                        print(f"[DEBUG-Paradex] bid={bid}, ask={ask} (invalid)")
 
-            print(f"[DEBUG-Paradex] Market {self.market} not found")
             return None
 
         except Exception as e:
@@ -411,43 +407,29 @@ class ParadexClient:
             # Try SDK first if available
             if self.client:
                 try:
-                    print(f"[DEBUG-SDK] Calling fetch_markets_summary() via SDK...")
                     # Use markets_summary for live data (not fetch_markets which returns config)
                     markets = self.client.api_client.fetch_markets_summary({"market": self.market})
-                    print(f"[DEBUG-SDK] Response type: {type(markets)}")
 
                     # Validate response type
                     if markets and isinstance(markets, (list, dict)):
-                        print(f"[DEBUG-SDK] Valid response type received")
-
                         # Handle dict response with results array
                         if isinstance(markets, dict) and 'results' in markets:
-                            print(f"[DEBUG-SDK] Found 'results' key in dict response")
                             markets = markets['results']
 
                         # Ensure we have a list
                         if not isinstance(markets, list):
                             markets = [markets]
 
-                        print(f"[DEBUG-SDK] Processing {len(markets)} markets")
-
                         # Find our market
                         for market in markets:
                             # Skip non-dict items
                             if not isinstance(market, dict):
-                                print(f"[DEBUG-SDK] Skipping non-dict item: {type(market)}")
                                 continue
 
                             market_symbol = market.get('symbol') or market.get('market')
-                            print(f"[DEBUG-SDK] Checking market: {market_symbol}")
 
                             if market_symbol == self.market:
-                                print(f"[DEBUG-SDK] Found target market: {self.market}")
-                                print(f"[DEBUG-SDK] Available fields: {list(market.keys())}")
-
                                 funding_rate = float(market.get('funding_rate', 0))
-                                print(f"[DEBUG-SDK] Extracted funding_rate: {funding_rate}")
-                                print(f"[DEBUG-SDK] Raw value - funding_rate: {market.get('funding_rate')}")
 
                                 # Paradex uses 8-hour funding periods (3 times per day)
                                 return {
@@ -459,11 +441,8 @@ class ParadexClient:
                                     'source': 'SDK'
                                 }
 
-                        print(f"[DEBUG-SDK] Target market {self.market} not found in SDK response")
                 except Exception as sdk_error:
                     print(f"ℹ️  SDK funding rate query failed, falling back to REST API: {sdk_error}")
-                    import traceback
-                    traceback.print_exc()
 
             # Fallback to REST API - try multiple endpoints with market parameter
             endpoints_to_try = [
@@ -474,11 +453,9 @@ class ParadexClient:
 
             for endpoint in endpoints_to_try:
                 try:
-                    print(f"[DEBUG] Trying endpoint: {endpoint}")
                     data = await self._make_request("GET", endpoint, signed=False)
 
                     if not data:
-                        print(f"[DEBUG] No data from {endpoint}")
                         continue
 
                     # Handle different response structures
@@ -490,30 +467,22 @@ class ParadexClient:
                             market_data = data
                         # Summary with results array
                         elif 'results' in data:
-                            print(f"[DEBUG] Found {len(data['results'])} markets in results")
                             for market in data['results']:
                                 if market.get('symbol') == self.market or market.get('market') == self.market:
                                     market_data = market
                                     break
                     elif isinstance(data, list):
                         # Array of markets
-                        print(f"[DEBUG] Found {len(data)} markets in array")
                         for market in data:
                             if market.get('symbol') == self.market or market.get('market') == self.market:
                                 market_data = market
                                 break
 
                     if market_data:
-                        print(f"[DEBUG] Found market data for {self.market}")
-                        print(f"[DEBUG] Available fields: {list(market_data.keys())}")
-
                         # Extract funding rate (field name may vary)
                         funding_rate = float(market_data.get('funding_rate',
                                             market_data.get('fundingRate',
                                             market_data.get('funding', 0))))
-
-                        print(f"[DEBUG] Extracted funding_rate: {funding_rate}")
-                        print(f"[DEBUG] Raw values - funding_rate: {market_data.get('funding_rate')}, fundingRate: {market_data.get('fundingRate')}, funding: {market_data.get('funding')}")
 
                         next_funding = market_data.get('next_funding_time',
                                                       market_data.get('nextFundingTime',
@@ -530,7 +499,6 @@ class ParadexClient:
 
                 except Exception as e:
                     # Try next endpoint
-                    print(f"[DEBUG] Error with {endpoint}: {e}")
                     continue
 
             print(f"⚠️  Could not find funding rate for {self.market} on Paradex")
@@ -539,8 +507,6 @@ class ParadexClient:
 
         except Exception as e:
             print(f"❌ Error fetching Paradex funding rate: {e}")
-            import traceback
-            traceback.print_exc()
             return None
 
     async def cancel_order(self, order_id: str) -> bool:
