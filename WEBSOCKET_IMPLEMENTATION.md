@@ -293,10 +293,71 @@ if self.position_open:
    → ループモード: 先に決済してから新サイクル開始
 ```
 
+## 🔧 OrderExpiry エラーの修正
+
+### 問題
+- ポジション決済時に「OrderExpiry is invalid」エラーが発生
+- 原因: `create_order` に `expiry_time` パラメータを渡していなかった
+- Lighter SDK で `GOOD_TILL_TIME` を使う場合は `expiry_time` が必須
+
+### 修正内容
+
+#### 1. `place_limit_order` に `expiry_time` を追加
+```python
+# Calculate expiry time (24 hours from now)
+expiry_time = int(time.time()) + 86400  # 24 hours in seconds
+
+tx, tx_hash, err = await self.client.create_order(
+    ...
+    time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
+    reduce_only=reduce_only,
+    expiry_time=expiry_time,  # 追加
+)
+```
+
+#### 2. `place_market_order` にも `expiry_time` を追加
+```python
+# Calculate expiry time (1 hour from now for market orders)
+expiry_time = int(time.time()) + 3600  # 1 hour in seconds
+
+tx, tx_hash, err = await self.client.create_order(
+    ...
+    time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,
+    reduce_only=reduce_only,
+    expiry_time=expiry_time,  # 追加
+)
+```
+
+#### 3. `reduce_only` パラメータを追加
+- `place_limit_order(side, size, price, reduce_only=False)`
+- `place_market_order(side, size, reduce_only=False)`
+- ポジション決済時には `reduce_only=True` を渡す
+
+#### 4. ポジション決済時に `reduce_only=True` を使用
+```python
+# bot/delta_neutral_strategy.py
+tasks = [
+    self.bot.paradex.place_market_order('SELL', position_size),
+    self.bot.lighter.place_market_order('BUY', position_size, reduce_only=True)
+]
+```
+
+### 動作フロー（修正後）
+```
+注文作成時:
+├─ expiry_time を計算（指値: 24時間後、市場: 1時間後）
+├─ reduce_only パラメータを設定
+└─ create_order に expiry_time を渡す
+
+ポジション決済時:
+├─ reduce_only=True で注文
+└─ 既存ポジションのみを決済（新規ポジションは開かない）
+```
+
 ## 📦 コミット情報
 
 **最新コミット**: (未コミット)
-**前回コミット**: `1dc561c`
+**前回コミット**: `515aeed` (Ctrl+C ポジション決済機能)
 **ブランチ**: `claude/fix-websocket-execution-011CV1YZxjH7n6UCWgVdGG3J`
 
 ### 変更サマリー:

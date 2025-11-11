@@ -1155,10 +1155,11 @@ class DeltaNeutralStrategy:
         else:
             print(f"   Lighter: BUY {position_size} @ (price unavailable)")
 
-        # Execute both orders simultaneously
+        # Execute both orders simultaneously with reduce_only=True
+        # reduce_only ensures orders only close existing positions, not open new ones
         tasks = [
             self.bot.paradex.place_market_order('SELL', position_size),
-            self.bot.lighter.place_market_order('BUY', position_size)
+            self.bot.lighter.place_market_order('BUY', position_size, reduce_only=True)
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)

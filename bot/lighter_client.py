@@ -267,7 +267,7 @@ class LighterClient:
             traceback.print_exc()
             return None
 
-    async def place_limit_order(self, side: str, size: float, price: float) -> Optional[Dict[str, Any]]:
+    async def place_limit_order(self, side: str, size: float, price: float, reduce_only: bool = False) -> Optional[Dict[str, Any]]:
         """
         Place a limit order
 
@@ -275,6 +275,7 @@ class LighterClient:
             side: Order side ('BUY' or 'SELL')
             size: Order size
             price: Limit price
+            reduce_only: If True, order will only reduce existing position (for closing positions)
 
         Returns:
             Order result with order_id or None if error
@@ -335,6 +336,12 @@ class LighterClient:
                     f"Increase position size or check market configuration."
                 )
 
+            # Calculate expiry time (24 hours from now)
+            expiry_time = int(time.time()) + 86400  # 24 hours in seconds
+
+            print(f"   Reduce only: {reduce_only}")
+            print(f"   Expiry time: {expiry_time} ({time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(expiry_time))})")
+
             # Place limit order using create_order
             tx, tx_hash, err = await self.client.create_order(
                 market_index=market_id,
@@ -344,8 +351,9 @@ class LighterClient:
                 is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
                 order_type=lighter.SignerClient.ORDER_TYPE_LIMIT,
                 time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
-                reduce_only=False,
+                reduce_only=reduce_only,
                 trigger_price=0,
+                expiry_time=expiry_time,
             )
 
             if err is not None:
@@ -406,13 +414,14 @@ class LighterClient:
             print(f"❌ Error checking order status: {e}")
             return None
 
-    async def place_market_order(self, side: str, size: float) -> Optional[Dict[str, Any]]:
+    async def place_market_order(self, side: str, size: float, reduce_only: bool = False) -> Optional[Dict[str, Any]]:
         """
         Place a market order
 
         Args:
             side: Order side ('BUY' or 'SELL')
             size: Order size
+            reduce_only: If True, order will only reduce existing position (for closing positions)
 
         Returns:
             Order result or None if error
@@ -464,6 +473,12 @@ class LighterClient:
             print(f"   Price: {limit_price} → {price_int} (decimals: {price_decimals})")
             print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
 
+            # Calculate expiry time (1 hour from now for market orders)
+            expiry_time = int(time.time()) + 3600  # 1 hour in seconds
+
+            print(f"   Reduce only: {reduce_only}")
+            print(f"   Expiry time: {expiry_time} ({time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(expiry_time))})")
+
             # Place market order using create_order with ORDER_TYPE_MARKET
             tx, tx_hash, err = await self.client.create_order(
                 market_index=market_id,
@@ -473,8 +488,9 @@ class LighterClient:
                 is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
                 order_type=lighter.SignerClient.ORDER_TYPE_MARKET,
                 time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,
-                reduce_only=False,  # Not reducing existing position
+                reduce_only=reduce_only,
                 trigger_price=0,
+                expiry_time=expiry_time,
             )
 
             if err is not None:
