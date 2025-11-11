@@ -114,143 +114,137 @@ class DeltaNeutralStrategy:
 
     async def _check_funding_rate_opportunity(self) -> Optional[Dict[str, Any]]:
         """
-        Check if there's a funding rate arbitrage opportunity
+        Check if there's a funding rate arbitrage opportunity (Paradex-only strategy)
 
-        Lighter: Hourly discrete funding with ±0.5% cap
-        Paradex: Continuous funding (pro-rated) with ±5% annual cap
+        Strategy:
+        - Only check Paradex funding rate (simpler, more reliable)
+        - If positive (>threshold): Paradex SHORT, Lighter LONG
+        - If negative (<-threshold): Paradex LONG, Lighter SHORT
+        - Lighter automatically hedges (delta neutral)
+
+        For short-term holding (2-3 hours), Paradex continuous funding is more suitable
 
         Returns:
             Dict with funding rate analysis and recommendation:
             {
-                'opportunity': bool,  # True if should open position
-                'lighter_rate': float,
+                'opportunity': bool,
                 'paradex_rate': float,
-                'rate_diff_pct': float,
+                'paradex_rate_8h': float,
                 'estimated_apy': float,
-                'recommendation': str,  # 'LIGHTER_SHORT' or 'LIGHTER_LONG' or 'NO_POSITION'
+                'recommendation': str,
+                'paradex_side': str,
+                'lighter_side': str,
                 'reason': str
             }
-            or None if error
         """
         if not self.bot.config.funding_rate_enabled:
             return {
                 'opportunity': True,  # Bypass check if disabled
-                'lighter_rate': 0,
                 'paradex_rate': 0,
-                'rate_diff_pct': 0,
+                'paradex_rate_8h': 0,
                 'estimated_apy': 0,
                 'recommendation': 'NO_CHECK',
-                'paradex_side': 'BUY',  # Default to standard strategy
+                'paradex_side': 'BUY',  # Default
                 'lighter_side': 'SELL',
                 'reason': 'Funding rate check disabled in config'
             }
 
-        print(f"\n💹 ファンディングレートアービトラージ機会をチェック中...")
+        print(f"\n💹 Paradexファンディングレートをチェック中...")
 
         try:
-            # Get funding rates from both exchanges
-            lighter_funding = await self.bot.lighter.get_funding_rate()
+            # Get Paradex funding rate only
             paradex_funding = await self.bot.paradex.get_funding_rate()
 
-            if not lighter_funding or not paradex_funding:
-                print("⚠️  ファンディングレート取得失敗、スキップします")
+            if not paradex_funding:
+                print("⚠️  Paradexファンディングレート取得失敗、スキップします")
                 return {
                     'opportunity': True,  # Proceed anyway
-                    'lighter_rate': 0,
                     'paradex_rate': 0,
-                    'rate_diff_pct': 0,
+                    'paradex_rate_8h': 0,
                     'estimated_apy': 0,
                     'recommendation': 'DATA_UNAVAILABLE',
-                    'paradex_side': 'BUY',  # Default to standard strategy
+                    'paradex_side': 'BUY',  # Default
                     'lighter_side': 'SELL',
-                    'reason': 'Could not fetch funding rates'
+                    'reason': 'Could not fetch Paradex funding rate'
                 }
 
-            # Extract rates (convert to comparable format)
-            # Lighter: hourly rate, Paradex: 8-hour rate
-            lighter_rate_hourly = lighter_funding['funding_rate']
+            # Extract 8-hour rate
             paradex_rate_8h = paradex_funding['funding_rate']
 
-            # Convert Paradex 8-hour rate to hourly for comparison
-            paradex_rate_hourly = paradex_rate_8h / 8
+            # Convert to percentage
+            paradex_rate_pct = paradex_rate_8h * 100
 
-            print(f"   Lighter: {lighter_rate_hourly*100:.4f}%/時 (離散型)")
-            print(f"   Paradex: {paradex_rate_hourly*100:.4f}%/時 (連続型、{paradex_rate_8h*100:.4f}%/8時間)")
+            print(f"   Paradex: {paradex_rate_pct:.4f}%/8時間 (連続型)")
 
-            # Calculate absolute difference
-            rate_diff = abs(lighter_rate_hourly - paradex_rate_hourly)
-            rate_diff_pct = rate_diff * 100  # Convert to percentage
+            # Estimate annual yield
+            # 3 funding periods per day (8h each) × 365 days
+            estimated_apy = paradex_rate_8h * 3 * 365 * 100
 
-            # Estimate annual yield (conservative: 16 hours/day holding, 250 trading days)
-            # Lighter discrete: full hour payment, Paradex: pro-rated
-            hours_per_year = 16 * 250  # Conservative estimate
-            estimated_apy = rate_diff * hours_per_year * 100  # As percentage
-
-            print(f"   差額: {rate_diff_pct:.4f}%/時")
             print(f"   推定APY: {estimated_apy:.2f}%")
 
-            # Decision logic
-            min_diff_pct = self.bot.config.funding_rate_min_diff_pct
-            target_apy = self.bot.config.funding_rate_target_apy
+            # Decision logic: use absolute value
+            min_rate_pct = self.bot.config.funding_rate_min_diff_pct  # Re-purpose as min absolute rate
+            abs_rate_pct = abs(paradex_rate_pct)
 
-            if rate_diff_pct < min_diff_pct:
-                print(f"   ⚠️  差額が閾値未満 ({min_diff_pct}%)")
+            if abs_rate_pct < min_rate_pct:
+                print(f"   ⚠️  レートが閾値未満 (|{paradex_rate_pct:.4f}%| < {min_rate_pct}%)")
                 return {
                     'opportunity': False,
-                    'lighter_rate': lighter_rate_hourly,
-                    'paradex_rate': paradex_rate_hourly,
-                    'rate_diff_pct': rate_diff_pct,
+                    'paradex_rate': paradex_rate_8h,
+                    'paradex_rate_8h': paradex_rate_8h,
                     'estimated_apy': estimated_apy,
                     'recommendation': 'NO_POSITION',
-                    'reason': f'Rate difference {rate_diff_pct:.4f}% below threshold {min_diff_pct}%'
+                    'paradex_side': 'BUY',
+                    'lighter_side': 'SELL',
+                    'reason': f'Paradex rate |{paradex_rate_pct:.4f}%| below threshold {min_rate_pct}%'
                 }
 
-            # Determine position direction based on funding rates
-            # Rule: SHORT on the exchange with HIGHER funding rate (receive more)
-            #       LONG on the exchange with LOWER funding rate (pay less)
-            if lighter_rate_hourly > paradex_rate_hourly:
-                # Lighter has higher rate → SHORT on Lighter, LONG on Paradex
-                paradex_side = 'BUY'
-                lighter_side = 'SELL'
-                recommendation = 'LIGHTER_SHORT_PARADEX_LONG'
-                reason = f'Lighter rate ({lighter_rate_hourly*100:.4f}%) > Paradex rate ({paradex_rate_hourly*100:.4f}%)'
-            else:
-                # Paradex has higher rate → SHORT on Paradex, LONG on Lighter
+            # Determine position direction based on Paradex funding rate sign
+            if paradex_rate_8h > 0:
+                # Positive funding: longs pay shorts
+                # → Paradex SHORT (receive funding)
+                # → Lighter LONG (delta hedge)
                 paradex_side = 'SELL'
                 lighter_side = 'BUY'
                 recommendation = 'PARADEX_SHORT_LIGHTER_LONG'
-                reason = f'Paradex rate ({paradex_rate_hourly*100:.4f}%) > Lighter rate ({lighter_rate_hourly*100:.4f}%)'
+                reason = f'Paradex positive funding (+{paradex_rate_pct:.4f}%) → SHORT receives payment'
+            else:
+                # Negative funding: shorts pay longs
+                # → Paradex LONG (receive funding)
+                # → Lighter SHORT (delta hedge)
+                paradex_side = 'BUY'
+                lighter_side = 'SELL'
+                recommendation = 'PARADEX_LONG_LIGHTER_SHORT'
+                reason = f'Paradex negative funding ({paradex_rate_pct:.4f}%) → LONG receives payment'
 
             print(f"   ✅ 機会あり: {recommendation}")
             print(f"   理由: {reason}")
-            print(f"   Paradex: {paradex_side}, Lighter: {lighter_side}")
+            print(f"   Paradex: {paradex_side}, Lighter: {lighter_side} (ヘッジ)")
 
             return {
                 'opportunity': True,
-                'lighter_rate': lighter_rate_hourly,
-                'paradex_rate': paradex_rate_hourly,
-                'rate_diff_pct': rate_diff_pct,
+                'paradex_rate': paradex_rate_8h,
+                'paradex_rate_8h': paradex_rate_8h,
                 'estimated_apy': estimated_apy,
                 'recommendation': recommendation,
-                'paradex_side': paradex_side,  # 'BUY' or 'SELL'
-                'lighter_side': lighter_side,  # 'BUY' or 'SELL'
+                'paradex_side': paradex_side,
+                'lighter_side': lighter_side,
                 'reason': reason
             }
 
         except Exception as e:
-            print(f"❌ ファンディングレートチェックエラー: {e}")
+            print(f"❌ Paradexファンディングレートチェックエラー: {e}")
             import traceback
             traceback.print_exc()
             return {
                 'opportunity': True,  # Proceed anyway on error
-                'lighter_rate': 0,
                 'paradex_rate': 0,
-                'rate_diff_pct': 0,
+                'paradex_rate_8h': 0,
                 'estimated_apy': 0,
                 'recommendation': 'ERROR',
-                'paradex_side': 'BUY',  # Default to standard strategy
+                'paradex_side': 'BUY',  # Default
                 'lighter_side': 'SELL',
-                'reason': f'Error checking funding rates: {e}'
+                'reason': f'Error checking Paradex funding rate: {e}'
             }
 
     def _save_position_to_file(self):

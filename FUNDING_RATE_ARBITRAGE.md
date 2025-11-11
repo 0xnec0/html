@@ -1,53 +1,57 @@
-# ファンディングレートアービトラージ機能
+# ファンディングレートアービトラージ機能（Paradex単独戦略）
 
 ## 📊 概要
 
-このボットは、LighterとParadexのファンディングレート差を利用したアービトラージ戦略を実装しています。
+このボットは、**Paradexのファンディングレートのみ**を参照して、デルタニュートラルポジションを構築します。
 
-### 両プラットフォームの違い
+### 戦略の特徴
 
-| 項目 | Lighter | Paradex |
+**シンプルさ重視**:
+- ✅ Paradexのファンディングレートのみチェック
+- ✅ Lighterは自動的に逆方向でヘッジ
+- ✅ 短時間保有（2-3時間）に最適
+- ✅ エラーが少なく安定動作
+
+### Paradex連続型ファンディングの利点
+
+| 項目 | Paradex (使用) | Lighter (未使用) |
 |------|---------|---------|
-| ファンディング方式 | **離散型** (1時間毎決済) | **連続型** (保有時間比例) |
-| 支払いタイミング | 毎時0分 | 8時間毎（3回/日） |
-| レート上限 | ±0.5%/時 | ±5%/年 |
-| 決済方法 | 時間経過で満額受取 | 保有時間に比例配分 |
+| ファンディング方式 | **連続型** (保有時間比例) | 離散型 (1時間毎決済) |
+| 短時間保有 | ✅ 2-3時間でも効果的 | ❌ 1時間未満は無効 |
+| API安定性 | ✅ 大手で安定 | ⚠️ 時々失敗 |
+| 実装複雑度 | ✅ シンプル | ❌ 差分計算が複雑 |
 
 ## 🎯 アービトラージ戦略
 
 ### 基本ロジック
 
-1. **両取引所のファンディングレートを取得**
-   - Lighter: `/api/v1/fundings` (時間レート)
-   - Paradex: `/v1/markets` (8時間レート)
+1. **Paradexのファンディングレートを取得**
+   - エンドポイント: `/v1/markets` (8時間レート)
 
-2. **レート差を計算**
-   - Paradexの8時間レートを時間レートに変換 (÷8)
-   - 両取引所の時間レートの差を算出
-   - 年率換算（APY）を推定
+2. **絶対値で閾値判断**
+   - 閾値: デフォルト0.3%/8時間（年率約13.7%）
+   - 絶対値が閾値以上なら機会あり
 
-3. **ポジション判断**
-   - レート差が閾値以上 → ポジションオープン
-   - レート差が閾値未満 → スキップ
+3. **ポジション方向決定**
+   - **正ファンディング**: Paradex SHORT + Lighter LONG
+   - **負ファンディング**: Paradex LONG + Lighter SHORT
 
 ### 収益機会の例
 
-**シナリオ1: 強気相場（ポジティブファンディング）**
+**シナリオ1: 強気相場（正ファンディング）**
 ```
-Lighter:  +0.01%/時 (離散型で満額受取)
-Paradex:  +0.005%/時 (連続型で比例配分)
-差額:     +0.005%/時
-戦略:     Lighter SHORT + Paradex LONG
-年率:     約10-15% APY
+Paradex:  +0.5%/8時間
+戦略:     Paradex SHORT (ファンディング受取) + Lighter LONG (ヘッジ)
+収益:     0.5% × 3回/日 × 365日 = 年率54.7%
+実際:     短時間保有で年率約15-20%
 ```
 
-**シナリオ2: 弱気相場（ネガティブファンディング）**
+**シナリオ2: 弱気相場（負ファンディング）**
 ```
-Lighter:  -0.01%/時
-Paradex:  -0.005%/時
-差額:     +0.005%/時
-戦略:     標準戦略を維持 (Paradex LONG + Lighter SHORT)
-年率:     約8-12% APY
+Paradex:  -0.3%/8時間
+戦略:     Paradex LONG (ファンディング受取) + Lighter SHORT (ヘッジ)
+収益:     0.3% × 3回/日 × 365日 = 年率32.8%
+実際:     短時間保有で年率約10-15%
 ```
 
 ## ⚙️ 設定
@@ -55,11 +59,11 @@ Paradex:  -0.005%/時
 ### 環境変数 (.env)
 
 ```bash
-# ファンディングレートアービトラージを有効化
+# ファンディングレートアービトラージを有効化（Paradex単独）
 FUNDING_RATE_ENABLED=true
 
-# 最小レート差（0.5% = 時間0.5%の差が必要）
-FUNDING_RATE_MIN_DIFF_PCT=0.5
+# 最小絶対レート（0.3% = Paradex 0.3%/8時間 ≈ 年率13.7%）
+FUNDING_RATE_MIN_DIFF_PCT=0.3
 
 # ファンディングレートチェック間隔（秒）
 FUNDING_RATE_CHECK_INTERVAL=300
@@ -73,11 +77,11 @@ FUNDING_RATE_TARGET_APY=10.0
 ```python
 @property
 def funding_rate_enabled(self) -> bool:
-    """ファンディングレートアービトラージを有効化"""
+    """ファンディングレートアービトラージを有効化（Paradex単独）"""
 
 @property
 def funding_rate_min_diff_pct(self) -> float:
-    """ポジションをオープンする最小レート差（%）"""
+    """ポジションをオープンする最小絶対レート（%/8時間）"""
 
 @property
 def funding_rate_check_interval(self) -> float:
@@ -92,24 +96,7 @@ def funding_rate_target_apy(self) -> float:
 
 ### APIメソッド
 
-#### Lighter Client
-```python
-async def get_funding_rate() -> Optional[Dict[str, Any]]:
-    """
-    Lighterのファンディングレートを取得
-
-    Returns:
-        {
-            'funding_rate': float,       # 時間レート (0.0001 = 0.01%)
-            'funding_rate_pct': float,   # パーセント表示
-            'next_funding_time': int,    # 次回決済時刻
-            'market': str,               # マーケット名
-            'source': str                # 'SDK' or 'REST'
-        }
-    """
-```
-
-#### Paradex Client
+#### Paradex Client（使用）
 ```python
 async def get_funding_rate() -> Optional[Dict[str, Any]]:
     """
@@ -129,20 +116,21 @@ async def get_funding_rate() -> Optional[Dict[str, Any]]:
 
 ### 戦略メソッド
 
-#### ファンディングレート機会チェック
+#### ファンディングレート機会チェック（Paradex単独）
 ```python
 async def _check_funding_rate_opportunity() -> Optional[Dict[str, Any]]:
     """
-    ファンディングレートアービトラージ機会をチェック
+    ファンディングレートアービトラージ機会をチェック（Paradex単独戦略）
 
     Returns:
         {
             'opportunity': bool,           # ポジションを持つべきか
-            'lighter_rate': float,         # Lighter時間レート
-            'paradex_rate': float,         # Paradex時間レート
-            'rate_diff_pct': float,        # レート差（%）
+            'paradex_rate': float,         # Paradex 8時間レート
+            'paradex_rate_8h': float,      # 同上
             'estimated_apy': float,        # 推定年率
-            'recommendation': str,         # 'LIGHTER_SHORT', 'NO_POSITION', etc.
+            'recommendation': str,         # 'PARADEX_SHORT_LIGHTER_LONG', etc.
+            'paradex_side': str,           # 'BUY' or 'SELL'
+            'lighter_side': str,           # 'BUY' or 'SELL' (ヘッジ)
             'reason': str                  # 判断理由
         }
     """
@@ -219,13 +207,12 @@ python main.py delta-neutral --leverage 10
 ### 3. ログを確認
 
 ```
-💹 ファンディングレートアービトラージ機会をチェック中...
-   Lighter: 0.0100%/時 (離散型)
-   Paradex: 0.0050%/時 (連続型、0.0400%/8時間)
-   差額: 0.0050%/時
-   推定APY: 12.50%
-   ✅ 機会あり: LIGHTER_SHORT
-   理由: Lighter rate (0.0100%) > Paradex rate (0.0050%)
+💹 Paradexファンディングレートをチェック中...
+   Paradex: +0.4000%/8時間 (連続型)
+   推定APY: 43.80%
+   ✅ 機会あり: PARADEX_SHORT_LIGHTER_LONG
+   理由: Paradex positive funding (+0.4000%) → SHORT receives payment
+   Paradex: SELL, Lighter: BUY (ヘッジ)
 ```
 
 ## 📊 ポジション情報
@@ -238,14 +225,17 @@ python main.py delta-neutral --leverage 10
   "size": 10.0,
   "paradex_price": 0.8523,
   "lighter_price": 0.8519,
+  "paradex_side": "SELL",
+  "lighter_side": "BUY",
   "funding_check": {
     "opportunity": true,
-    "lighter_rate": 0.0001,
-    "paradex_rate": 0.00005,
-    "rate_diff_pct": 0.005,
-    "estimated_apy": 12.5,
-    "recommendation": "LIGHTER_SHORT",
-    "reason": "Lighter rate (0.0100%) > Paradex rate (0.0050%)"
+    "paradex_rate": 0.004,
+    "paradex_rate_8h": 0.004,
+    "estimated_apy": 43.8,
+    "recommendation": "PARADEX_SHORT_LIGHTER_LONG",
+    "paradex_side": "SELL",
+    "lighter_side": "BUY",
+    "reason": "Paradex positive funding (+0.4000%) → SHORT receives payment"
   }
 }
 ```
@@ -258,6 +248,14 @@ python main.py delta-neutral --leverage 10
 ## 📝 注意事項
 
 - ファンディングレートは市場状況により変動します
-- 推定APYは過去データに基づく概算値です
-- 実際の収益は保有時間、市場ボラティリティ、手数料などに依存します
+- 推定APYは理論値で、実際の収益は保有時間に依存します
+- **短時間保有（2-3時間）**では理論APYの一部のみ実現
+- Paradexの連続型ファンディングは保有時間に比例配分されます
 - リスク管理を適切に行い、資金を分散してください
+
+## 💡 Paradex単独戦略を選んだ理由
+
+1. **シンプルさ**: API呼び出し1回、エラーが少ない
+2. **短時間保有**: Paradex連続型は2-3時間でも効果的
+3. **安定性**: Paradex API は大手で信頼性が高い
+4. **保守性**: コードが簡潔で理解しやすい

@@ -195,17 +195,17 @@ class Config:
         timeout = os.getenv('SPREAD_CHECK_TIMEOUT', self.config_data.get('spread', {}).get('check_timeout', '0'))
         return float(timeout)
 
-    # Funding Rate Arbitrage Configuration
+    # Funding Rate Arbitrage Configuration (Paradex-only strategy)
     @property
     def funding_rate_enabled(self) -> bool:
-        """Enable funding rate arbitrage strategy"""
+        """Enable funding rate arbitrage strategy (Paradex-only)"""
         enabled = os.getenv('FUNDING_RATE_ENABLED', self.config_data.get('funding', {}).get('enabled', 'true'))
         return enabled.lower() in ('true', '1', 'yes')
 
     @property
     def funding_rate_min_diff_pct(self) -> float:
-        """Minimum funding rate difference to trigger position (in percentage)"""
-        diff = os.getenv('FUNDING_RATE_MIN_DIFF_PCT', self.config_data.get('funding', {}).get('min_diff_pct', '0.5'))
+        """Minimum absolute Paradex funding rate to trigger position (in %/8h)"""
+        diff = os.getenv('FUNDING_RATE_MIN_DIFF_PCT', self.config_data.get('funding', {}).get('min_diff_pct', '0.3'))
         return float(diff)
 
     @property
