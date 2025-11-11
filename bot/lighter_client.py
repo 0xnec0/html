@@ -195,84 +195,61 @@ class LighterClient:
         """
         Get current bid and ask prices
 
+        Note: Lighter doesn't provide orderbook via REST API.
+        We use last_trade_price with small estimated spread instead.
+
         Returns:
             Tuple of (bid, ask) or None if error
         """
         try:
-            # Try SDK first if available
-            if self.client:
-                try:
-                    # Get market_id
-                    market_id = await self._get_market_id_from_api(self.market)
-                    if market_id is None:
-                        print(f"⚠️  Could not find market_id for {self.market}")
-                    else:
-                        # Try to get orderbook via SDK
-                        # Note: SDK might not have direct orderbook method, fallback to REST
-                        pass
-                except Exception:
-                    pass
-
-            # Use REST API - get orderbook from market details
             import aiohttp
             session = await self._get_session()
 
-            # This endpoint returns market info including orderbook
-            # But we need to fetch from the public orderbook endpoint
-            url = f"{self.base_url}/orderbook?symbol={self.market}"
+            # Get market info which includes last_trade_price
+            url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
 
             try:
                 async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                     if response.status == 200:
                         data = await response.json()
 
-                        # DEBUG: Print API response structure
-                        if not hasattr(self, '_api_structure_logged'):
-                            print(f"\n🔍 DEBUG: Lighter API Response Structure")
-                            print(f"   URL: {url}")
-                            print(f"   Response type: {type(data)}")
-                            if isinstance(data, dict):
-                                print(f"   Keys: {list(data.keys())}")
-                            self._api_structure_logged = True
+                        if isinstance(data, dict) and 'order_book_details' in data:
+                            for book in data['order_book_details']:
+                                symbol = book.get('symbol', '')
 
-                        # Extract orderbook
-                        if isinstance(data, dict):
-                            # Try different possible key names
-                            order_book = data.get('order_book', data.get('orderBook', data))
+                                if symbol.upper() == self.market.upper():
+                                    # Get last trade price
+                                    last_price = book.get('last_trade_price', 0)
 
-                            asks = order_book.get('asks', [])
-                            bids = order_book.get('bids', [])
+                                    if last_price and float(last_price) > 0:
+                                        last_price = float(last_price)
 
-                            # DEBUG: Market found
-                            if not hasattr(self, '_market_found_logged'):
-                                print(f"✓ Found market: {self.market}")
-                                print(f"   Asks count: {len(asks)}")
-                                print(f"   Bids count: {len(bids)}")
-                                if len(asks) > 0:
-                                    print(f"   First ask type: {type(asks[0])}, value: {asks[0]}")
-                                if len(bids) > 0:
-                                    print(f"   First bid type: {type(bids[0])}, value: {bids[0]}")
-                                self._market_found_logged = True
+                                        # Estimate tight bid/ask spread (0.1% = 10 basis points)
+                                        # This is reasonable for liquid perpetual futures
+                                        spread_pct = 0.001  # 0.1%
+                                        half_spread = last_price * spread_pct / 2
 
-                            if asks and bids and len(asks) > 0 and len(bids) > 0:
-                                # Parse based on format
-                                if isinstance(asks[0], list) and len(asks[0]) >= 2:
-                                    # Format: [["price", "size"], ...]
-                                    best_ask = float(asks[0][0])
-                                    best_bid = float(bids[0][0])
-                                elif isinstance(asks[0], dict):
-                                    # Format: [{"price": "...", "size": "..."}, ...]
-                                    best_ask = float(asks[0].get('price', asks[0].get('p', 0)))
-                                    best_bid = float(bids[0].get('price', bids[0].get('p', 0)))
-                                else:
-                                    print(f"❌ Unknown orderbook format: {type(asks[0])}")
-                                    return None
+                                        estimated_bid = last_price - half_spread
+                                        estimated_ask = last_price + half_spread
 
-                                if best_bid > 0 and best_ask > 0:
-                                    return (best_bid, best_ask)
-                            else:
-                                print(f"⚠️  {self.market}: オーダーブック空")
-                                return None
+                                        if not hasattr(self, '_price_estimation_logged'):
+                                            print(f"\nℹ️  Lighter API doesn't provide real-time orderbook via REST")
+                                            print(f"   Using last_trade_price with estimated {spread_pct*100}% spread")
+                                            print(f"   Last price: ${last_price:.4f}")
+                                            print(f"   Estimated bid: ${estimated_bid:.4f}")
+                                            print(f"   Estimated ask: ${estimated_ask:.4f}")
+                                            self._price_estimation_logged = True
+
+                                        return (estimated_bid, estimated_ask)
+                                    else:
+                                        print(f"⚠️  {symbol}: 最終取引価格がありません")
+                                        return None
+
+                            print(f"❌ Market '{self.market}' not found in response")
+                            return None
+                        else:
+                            print(f"❌ Invalid API response structure")
+                            return None
                     else:
                         print(f"❌ HTTP {response.status}")
                         return None
