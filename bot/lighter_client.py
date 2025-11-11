@@ -623,10 +623,16 @@ class LighterClient:
         Args:
             callback: Async function to call when account data is received
                      Should accept a single parameter: account data dict
+
+        Raises:
+            AttributeError: If subscribe_account method is not available in SDK
         """
         if not self.client:
-            print("❌ Lighter SDK required for WebSocket subscriptions")
-            return
+            raise AttributeError("Lighter SDK client not available")
+
+        # Check if subscribe_account method exists
+        if not hasattr(self.client, 'subscribe_account'):
+            raise AttributeError("subscribe_account method not available in Lighter SDK")
 
         try:
             print(f"🔌 Subscribing to account updates for index {self.account_index}...")
@@ -658,10 +664,14 @@ class LighterClient:
                     import traceback
                     traceback.print_exc()
 
+        except AttributeError:
+            # Re-raise AttributeError so caller can handle it
+            raise
         except Exception as e:
             print(f"❌ WebSocket subscription error: {e}")
             import traceback
             traceback.print_exc()
+            raise
 
     async def get_position_from_account(self, account_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """

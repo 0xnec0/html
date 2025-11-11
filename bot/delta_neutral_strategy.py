@@ -302,18 +302,32 @@ class DeltaNeutralStrategy:
         print(f"   更新間隔: {wait_seconds}秒")
         print(f"   WebSocket検知: {'有効' if use_websocket else '無効'}")
 
-        # Get initial position size (for WebSocket detection)
+        # Get initial position size (for WebSocket detection and existing position check)
         initial_position_size = 0.0
-        if use_websocket:
-            try:
-                account_data = await self.bot.lighter.get_account_balance()
-                if account_data:
-                    position = await self.bot.lighter.get_position_from_account(account_data)
-                    if position:
-                        initial_position_size = position.get('size', 0)
-                        print(f"   初期ポジション: {initial_position_size:.2f}")
-            except Exception as e:
-                print(f"   ⚠️  初期ポジション取得失敗: {e}")
+        try:
+            account_data = await self.bot.lighter.get_account_balance()
+            if account_data:
+                position = await self.bot.lighter.get_position_from_account(account_data)
+                if position:
+                    initial_position_size = position.get('size', 0)
+                    print(f"   初期ポジション: {initial_position_size:.2f}")
+
+                    # Check if we already have the target position
+                    # For SELL orders, we expect position size to be -size (short position)
+                    expected_position = -size
+                    if abs(initial_position_size - expected_position) < size * 0.1:  # Allow 10% tolerance
+                        print(f"   ✅ すでに目標ポジションを保有しています")
+                        print(f"   現在: {initial_position_size:.2f}, 期待値: {expected_position:.2f}")
+                        return {
+                            'order_id': 'existing',
+                            'tx_hash': 'existing',
+                            'filled_size': size,
+                            'filled_price': 0,  # Unknown
+                            'status': 'FILLED'
+                        }
+        except Exception as e:
+            print(f"   ⚠️  初期ポジション取得失敗: {e}")
+            if use_websocket:
                 use_websocket = False
 
         current_order_id = None
