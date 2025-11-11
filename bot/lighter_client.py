@@ -1202,6 +1202,16 @@ class LighterClient:
             # Debug: Show account update received
             if self._initial_position_size is not None:
                 print(f"\n🔔 WS: Account update received (tracking active)")
+                # Dump entire account structure to understand data format
+                print(f"   Account keys: {list(account.keys()) if isinstance(account, dict) else 'N/A'}")
+                if isinstance(account, dict):
+                    # Show all keys and their types (not full values to avoid clutter)
+                    for key in account.keys():
+                        value = account[key]
+                        if isinstance(value, (list, dict)):
+                            print(f"   account['{key}']: {type(value).__name__} (len={len(value) if isinstance(value, list) else 'N/A'})")
+                        else:
+                            print(f"   account['{key}']: {type(value).__name__} = {value}")
 
             # Check for position changes
             if isinstance(account, dict):
