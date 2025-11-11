@@ -1212,7 +1212,17 @@ class LighterClient:
                     print(f"   Positions array length: {len(positions)}")
 
                 if positions:
-                    for pos in positions:
+                    for idx, pos in enumerate(positions):
+                        # Debug: Show raw position type and content
+                        if self._initial_position_size is not None:
+                            print(f"   Position[{idx}] type: {type(pos)}")
+                            if isinstance(pos, dict):
+                                print(f"   Position[{idx}] keys: {list(pos.keys())}")
+                                print(f"   Position[{idx}] market_id: {pos.get('market_id', 'N/A')}")
+                                print(f"   Position[{idx}] size: {pos.get('size', 'N/A')}")
+                            elif isinstance(pos, str):
+                                print(f"   Position[{idx}] (string): {pos[:100]}...")  # First 100 chars
+
                         # Handle pos as both dict and string
                         if isinstance(pos, str):
                             pos = json.loads(pos)
@@ -1235,6 +1245,10 @@ class LighterClient:
                                         print(f"\n✅ WS: Position change detected! {self._initial_position_size} → {size}")
                                         self._position_event.set()  # Signal position change
                                 break
+                        else:
+                            # Position is not a dict or string
+                            if self._initial_position_size is not None:
+                                print(f"   ⚠️  Position[{idx}] unexpected type: {type(pos)} = {pos}")
                 else:
                     # No positions but we're tracking - check if we had a position before
                     if self._initial_position_size is not None and self._initial_position_size > 0:
