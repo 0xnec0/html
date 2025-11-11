@@ -123,7 +123,8 @@ class ParadexClient:
     async def _get_session(self):
         """Get or create aiohttp session"""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            # trust_env=True enables automatic proxy detection from environment variables
+            self._session = aiohttp.ClientSession(trust_env=True)
         return self._session
 
     async def _make_request(self, method: str, endpoint: str, data: Dict = None, signed: bool = False) -> Optional[Dict[str, Any]]:

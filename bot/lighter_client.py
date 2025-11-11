@@ -79,7 +79,8 @@ class LighterClient:
         """Get or create aiohttp session"""
         if self._session is None or self._session.closed:
             import aiohttp
-            self._session = aiohttp.ClientSession()
+            # trust_env=True enables automatic proxy detection from environment variables
+            self._session = aiohttp.ClientSession(trust_env=True)
         return self._session
 
     async def _get_market_id_from_api(self, symbol: str) -> Optional[int]:
