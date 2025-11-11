@@ -199,80 +199,95 @@ class LighterClient:
             Tuple of (bid, ask) or None if error
         """
         try:
+            # Try SDK first if available
+            if self.client:
+                try:
+                    # Get market_id
+                    market_id = await self._get_market_id_from_api(self.market)
+                    if market_id is None:
+                        print(f"⚠️  Could not find market_id for {self.market}")
+                    else:
+                        # Try to get orderbook via SDK
+                        # Note: SDK might not have direct orderbook method, fallback to REST
+                        pass
+                except Exception:
+                    pass
+
+            # Use REST API - get orderbook from market details
             import aiohttp
             session = await self._get_session()
 
-            # Try multiple possible endpoints
-            endpoints = [
-                f"/api/v1/orderbook/{self.market}",  # Try specific orderbook endpoint
-                f"/api/v1/markets/{self.market}",     # Try markets endpoint
-                f"/orderbook?market={self.market}",   # Try query param format
-            ]
+            # This endpoint returns market info including orderbook
+            # But we need to fetch from the public orderbook endpoint
+            url = f"{self.base_url}/orderbook?symbol={self.market}"
 
-            for endpoint in endpoints:
-                url = f"{self.base_url}{endpoint}"
+            try:
+                async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        data = await response.json()
 
-                try:
-                    async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                        if response.status == 200:
-                            data = await response.json()
-
-                            # DEBUG: Print API response structure (only first successful call)
-                            if not hasattr(self, '_api_structure_logged'):
-                                print(f"\n🔍 DEBUG: Lighter API Response Structure")
-                                print(f"   URL: {url}")
-                                print(f"   Response type: {type(data)}")
-                                if isinstance(data, dict):
-                                    print(f"   Keys: {list(data.keys())}")
-                                self._api_structure_logged = True
-
-                            # Try to extract bid/ask from response
+                        # DEBUG: Print API response structure
+                        if not hasattr(self, '_api_structure_logged'):
+                            print(f"\n🔍 DEBUG: Lighter API Response Structure")
+                            print(f"   URL: {url}")
+                            print(f"   Response type: {type(data)}")
                             if isinstance(data, dict):
-                                asks = data.get('asks', [])
-                                bids = data.get('bids', [])
+                                print(f"   Keys: {list(data.keys())}")
+                            self._api_structure_logged = True
 
-                                # DEBUG: Market found
-                                if not hasattr(self, '_market_found_logged'):
-                                    print(f"✓ Found market: {self.market}")
-                                    print(f"   Asks count: {len(asks)}")
-                                    print(f"   Bids count: {len(bids)}")
-                                    self._market_found_logged = True
+                        # Extract orderbook
+                        if isinstance(data, dict):
+                            # Try different possible key names
+                            order_book = data.get('order_book', data.get('orderBook', data))
 
-                                if asks and bids and len(asks) > 0 and len(bids) > 0:
-                                    # asks[0] could be [price, size] or {"price": ..., "size": ...}
-                                    if isinstance(asks[0], list):
-                                        best_ask = float(asks[0][0])
-                                        best_bid = float(bids[0][0])
-                                    elif isinstance(asks[0], dict):
-                                        best_ask = float(asks[0].get('price', asks[0].get('p', 0)))
-                                        best_bid = float(bids[0].get('price', bids[0].get('p', 0)))
-                                    else:
-                                        continue  # Try next endpoint
+                            asks = order_book.get('asks', [])
+                            bids = order_book.get('bids', [])
 
-                                    if best_bid > 0 and best_ask > 0:
-                                        return (best_bid, best_ask)
+                            # DEBUG: Market found
+                            if not hasattr(self, '_market_found_logged'):
+                                print(f"✓ Found market: {self.market}")
+                                print(f"   Asks count: {len(asks)}")
+                                print(f"   Bids count: {len(bids)}")
+                                if len(asks) > 0:
+                                    print(f"   First ask type: {type(asks[0])}, value: {asks[0]}")
+                                if len(bids) > 0:
+                                    print(f"   First bid type: {type(bids[0])}, value: {bids[0]}")
+                                self._market_found_logged = True
+
+                            if asks and bids and len(asks) > 0 and len(bids) > 0:
+                                # Parse based on format
+                                if isinstance(asks[0], list) and len(asks[0]) >= 2:
+                                    # Format: [["price", "size"], ...]
+                                    best_ask = float(asks[0][0])
+                                    best_bid = float(bids[0][0])
+                                elif isinstance(asks[0], dict):
+                                    # Format: [{"price": "...", "size": "..."}, ...]
+                                    best_ask = float(asks[0].get('price', asks[0].get('p', 0)))
+                                    best_bid = float(bids[0].get('price', bids[0].get('p', 0)))
                                 else:
-                                    # This endpoint doesn't have orderbook data
-                                    continue
-                        elif response.status == 404:
-                            # Try next endpoint
-                            continue
-                        else:
-                            print(f"❌ HTTP {response.status} for {url}")
-                            continue
+                                    print(f"❌ Unknown orderbook format: {type(asks[0])}")
+                                    return None
 
-                except asyncio.TimeoutError:
-                    continue
-                except Exception as e:
-                    continue
+                                if best_bid > 0 and best_ask > 0:
+                                    return (best_bid, best_ask)
+                            else:
+                                print(f"⚠️  {self.market}: オーダーブック空")
+                                return None
+                    else:
+                        print(f"❌ HTTP {response.status}")
+                        return None
 
-            # All endpoints failed - use last trade price as estimate
-            print(f"⚠️  Could not find orderbook endpoint, using price estimate...")
-            # Return None to signal no liquidity
-            return None
+            except asyncio.TimeoutError:
+                print(f"❌ Timeout")
+                return None
+            except aiohttp.ClientError as e:
+                print(f"❌ ClientError: {e}")
+                return None
 
         except Exception as e:
             print(f"❌ get_bid_ask error: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     async def place_limit_order(self, side: str, size: float, price: float) -> Optional[Dict[str, Any]]:
