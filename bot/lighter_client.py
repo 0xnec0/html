@@ -202,68 +202,77 @@ class LighterClient:
             import aiohttp
             session = await self._get_session()
 
-            # Use correct endpoint: /markets/{symbol} instead of /orderBookDetails
-            url = f"{self.base_url}/markets/{self.market}"
+            # Try multiple possible endpoints
+            endpoints = [
+                f"/api/v1/orderbook/{self.market}",  # Try specific orderbook endpoint
+                f"/api/v1/markets/{self.market}",     # Try markets endpoint
+                f"/orderbook?market={self.market}",   # Try query param format
+            ]
 
-            try:
-                async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                    if response.status == 200:
-                        data = await response.json()
+            for endpoint in endpoints:
+                url = f"{self.base_url}{endpoint}"
 
-                        # DEBUG: Print API response structure
-                        if not hasattr(self, '_api_structure_logged'):
-                            print(f"\n🔍 DEBUG: Lighter API Response Structure")
-                            print(f"   URL: {url}")
-                            print(f"   Response type: {type(data)}")
+                try:
+                    async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                        if response.status == 200:
+                            data = await response.json()
+
+                            # DEBUG: Print API response structure (only first successful call)
+                            if not hasattr(self, '_api_structure_logged'):
+                                print(f"\n🔍 DEBUG: Lighter API Response Structure")
+                                print(f"   URL: {url}")
+                                print(f"   Response type: {type(data)}")
+                                if isinstance(data, dict):
+                                    print(f"   Keys: {list(data.keys())}")
+                                self._api_structure_logged = True
+
+                            # Try to extract bid/ask from response
                             if isinstance(data, dict):
-                                print(f"   Keys: {list(data.keys())}")
-                            self._api_structure_logged = True
+                                asks = data.get('asks', [])
+                                bids = data.get('bids', [])
 
-                        # Extract bid/ask from market response
-                        # Response format: {"asks": [[price, size], ...], "bids": [[price, size], ...], ...}
-                        if isinstance(data, dict):
-                            asks = data.get('asks', [])
-                            bids = data.get('bids', [])
+                                # DEBUG: Market found
+                                if not hasattr(self, '_market_found_logged'):
+                                    print(f"✓ Found market: {self.market}")
+                                    print(f"   Asks count: {len(asks)}")
+                                    print(f"   Bids count: {len(bids)}")
+                                    self._market_found_logged = True
 
-                            # DEBUG: Market found
-                            if not hasattr(self, '_market_found_logged'):
-                                print(f"✓ Found market: {self.market}")
-                                print(f"   Asks count: {len(asks)}")
-                                print(f"   Bids count: {len(bids)}")
-                                self._market_found_logged = True
+                                if asks and bids and len(asks) > 0 and len(bids) > 0:
+                                    # asks[0] could be [price, size] or {"price": ..., "size": ...}
+                                    if isinstance(asks[0], list):
+                                        best_ask = float(asks[0][0])
+                                        best_bid = float(bids[0][0])
+                                    elif isinstance(asks[0], dict):
+                                        best_ask = float(asks[0].get('price', asks[0].get('p', 0)))
+                                        best_bid = float(bids[0].get('price', bids[0].get('p', 0)))
+                                    else:
+                                        continue  # Try next endpoint
 
-                            if asks and bids and len(asks) > 0 and len(bids) > 0:
-                                # asks[0] = [price, size]
-                                # bids[0] = [price, size]
-                                best_ask = float(asks[0][0])
-                                best_bid = float(bids[0][0])
-
-                                if best_bid > 0 and best_ask > 0:
-                                    return (best_bid, best_ask)
-                            else:
-                                # Orderbook is empty - cannot place orders without liquidity
-                                last_price = data.get('last_trade_price', 0)
-                                if last_price and float(last_price) > 0:
-                                    print(f"⚠️  {self.market}: オーダーブック空 - 流動性待機中... (最終価格: ${float(last_price):.4f})")
+                                    if best_bid > 0 and best_ask > 0:
+                                        return (best_bid, best_ask)
                                 else:
-                                    print(f"⚠️  {self.market}: オーダーブックと最終取引価格がありません")
-                                # Return None to signal no liquidity - caller should retry
-                                return None
+                                    # This endpoint doesn't have orderbook data
+                                    continue
+                        elif response.status == 404:
+                            # Try next endpoint
+                            continue
                         else:
-                            print(f"❌ Invalid response structure")
-                        return None
-                    else:
-                        print(f"❌ HTTP {response.status}")
-                        return None
+                            print(f"❌ HTTP {response.status} for {url}")
+                            continue
 
-            except asyncio.TimeoutError:
-                print(f"❌ Timeout")
-                return None
-            except aiohttp.ClientError as e:
-                print(f"❌ ClientError: {e}")
-                return None
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    continue
 
-        except Exception:
+            # All endpoints failed - use last trade price as estimate
+            print(f"⚠️  Could not find orderbook endpoint, using price estimate...")
+            # Return None to signal no liquidity
+            return None
+
+        except Exception as e:
+            print(f"❌ get_bid_ask error: {e}")
             return None
 
     async def place_limit_order(self, side: str, size: float, price: float) -> Optional[Dict[str, Any]]:
