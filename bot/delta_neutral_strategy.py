@@ -182,24 +182,22 @@ class DeltaNeutralStrategy:
 
             print(f"   推定APY: {estimated_apy:.2f}%")
 
-            # Decision logic: use absolute value
-            min_rate_pct = self.bot.config.funding_rate_min_diff_pct  # Re-purpose as min absolute rate
-            abs_rate_pct = abs(paradex_rate_pct)
-
-            if abs_rate_pct < min_rate_pct:
-                print(f"   ⚠️  レートが閾値未満 (|{paradex_rate_pct:.4f}%| < {min_rate_pct}%)")
+            # Check if funding rate is zero (no opportunity)
+            if paradex_rate_8h == 0:
+                print(f"   ⚠️  ファンディングレートがゼロ - 機会なし")
                 return {
                     'opportunity': False,
                     'paradex_rate': paradex_rate_8h,
                     'paradex_rate_8h': paradex_rate_8h,
-                    'estimated_apy': estimated_apy,
+                    'estimated_apy': 0,
                     'recommendation': 'NO_POSITION',
                     'paradex_side': 'BUY',
                     'lighter_side': 'SELL',
-                    'reason': f'Paradex rate |{paradex_rate_pct:.4f}%| below threshold {min_rate_pct}%'
+                    'reason': 'Funding rate is zero'
                 }
 
-            # Determine position direction based on Paradex funding rate sign
+            # Determine position direction based on Paradex funding rate sign only
+            # No threshold check - any non-zero rate creates an opportunity
             if paradex_rate_8h > 0:
                 # Positive funding: longs pay shorts
                 # → Paradex SHORT (receive funding)
