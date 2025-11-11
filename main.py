@@ -275,16 +275,16 @@ async def main():
 
     except KeyboardInterrupt:
         print("\n\n⚠️  Interrupted by user")
-        sys.exit(0)
+        # Don't call sys.exit() here - let finally clause run
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
     finally:
         # Clean up client sessions
         if 'bot' in locals():
             await bot.close()
+            print("✅ Sessions closed")
 
     print("\n✅ Done")
 

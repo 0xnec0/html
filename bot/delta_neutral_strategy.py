@@ -1491,8 +1491,20 @@ class DeltaNeutralStrategy:
                 print("\n⏸️  Waiting 30 seconds before next cycle...")
                 await asyncio.sleep(30)
 
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            print("\n\n⚠️  Loop interrupted by user")
+        except asyncio.CancelledError:
+            print("\n\n⚠️  Loop cancelled (async task cancelled)")
+            await self.notifier.send_loop_stopped("Task cancelled")
+            if self.position_open:
+                print("🔄 Closing open position...")
+                try:
+                    await self.close_delta_neutral_position()
+                except Exception as e:
+                    print(f"❌ Error closing position: {e}")
+                    print("⚠️  Manual intervention may be required")
+            # Don't re-raise CancelledError - let cleanup happen gracefully
+            return
+        except KeyboardInterrupt:
+            print("\n\n⚠️  Loop interrupted by user (Ctrl+C)")
             await self.notifier.send_loop_stopped("Interrupted by user")
             if self.position_open:
                 print("🔄 Closing open position...")
@@ -1501,7 +1513,7 @@ class DeltaNeutralStrategy:
                 except Exception as e:
                     print(f"❌ Error closing position: {e}")
                     print("⚠️  Manual intervention may be required")
-            raise  # Re-raise to ensure proper cleanup
+            raise  # Re-raise KeyboardInterrupt to signal user interruption
         except Exception as e:
             print(f"\n❌ Error in loop: {e}")
             await self.notifier.send_error(f"Loop error: {e}", "Bot stopped due to error")
