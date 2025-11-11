@@ -195,6 +195,31 @@ class Config:
         timeout = os.getenv('SPREAD_CHECK_TIMEOUT', self.config_data.get('spread', {}).get('check_timeout', '0'))
         return float(timeout)
 
+    # Funding Rate Arbitrage Configuration
+    @property
+    def funding_rate_enabled(self) -> bool:
+        """Enable funding rate arbitrage strategy"""
+        enabled = os.getenv('FUNDING_RATE_ENABLED', self.config_data.get('funding', {}).get('enabled', 'true'))
+        return enabled.lower() in ('true', '1', 'yes')
+
+    @property
+    def funding_rate_min_diff_pct(self) -> float:
+        """Minimum funding rate difference to trigger position (in percentage)"""
+        diff = os.getenv('FUNDING_RATE_MIN_DIFF_PCT', self.config_data.get('funding', {}).get('min_diff_pct', '0.5'))
+        return float(diff)
+
+    @property
+    def funding_rate_check_interval(self) -> float:
+        """Funding rate check interval in seconds"""
+        interval = os.getenv('FUNDING_RATE_CHECK_INTERVAL', self.config_data.get('funding', {}).get('check_interval', '300'))
+        return float(interval)
+
+    @property
+    def funding_rate_target_apy(self) -> float:
+        """Target APY for funding rate arbitrage (in percentage)"""
+        apy = os.getenv('FUNDING_RATE_TARGET_APY', self.config_data.get('funding', {}).get('target_apy', '10.0'))
+        return float(apy)
+
     def validate(self) -> bool:
         """
         Validate required configuration

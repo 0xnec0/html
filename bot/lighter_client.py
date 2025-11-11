@@ -594,6 +594,85 @@ class LighterClient:
             print(f"ℹ️  Lighter balance info unavailable: {e}")
             return {"status": "UNAVAILABLE"}
 
+    async def get_funding_rate(self) -> Optional[Dict[str, Any]]:
+        """
+        Get current funding rate for the market
+
+        Lighter uses hourly discrete funding with ±0.5% cap per hour
+
+        Returns:
+            Dict with funding rate data:
+            {
+                'funding_rate': float,  # Hourly funding rate (e.g., 0.0001 = 0.01%)
+                'funding_rate_pct': float,  # As percentage (e.g., 0.01)
+                'next_funding_time': int,  # Unix timestamp
+                'market': str
+            }
+            or None if error
+        """
+        try:
+            session = await self._get_session()
+
+            # Try SDK first if available
+            if self.client:
+                try:
+                    api_client = lighter.ApiClient()
+                    try:
+                        candlestick_api = lighter.CandlestickApi(api_client)
+                        req = lighter.ReqGetFundings(market=self.market, limit=1)
+                        fundings = await candlestick_api.fundings(req)
+
+                        if fundings and hasattr(fundings, 'fundings') and len(fundings.fundings) > 0:
+                            latest = fundings.fundings[0]
+                            funding_rate = float(latest.funding_rate) if hasattr(latest, 'funding_rate') else 0
+
+                            return {
+                                'funding_rate': funding_rate,
+                                'funding_rate_pct': funding_rate * 100,
+                                'next_funding_time': getattr(latest, 'timestamp', 0),
+                                'market': self.market,
+                                'source': 'SDK'
+                            }
+                    finally:
+                        await api_client.close()
+                except Exception as sdk_error:
+                    print(f"ℹ️  SDK funding rate query failed, falling back to REST API: {sdk_error}")
+
+            # Fallback to REST API
+            url = f"{self.base_url}/api/v1/fundings?market={self.market}&limit=1"
+
+            async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    # Parse response - structure may be {"fundings": [...]} or direct array
+                    fundings_list = data.get('fundings', data) if isinstance(data, dict) else data
+
+                    if fundings_list and len(fundings_list) > 0:
+                        latest = fundings_list[0]
+                        funding_rate = float(latest.get('funding_rate', 0))
+
+                        return {
+                            'funding_rate': funding_rate,
+                            'funding_rate_pct': funding_rate * 100,
+                            'next_funding_time': latest.get('timestamp', 0),
+                            'market': self.market,
+                            'source': 'REST'
+                        }
+                    else:
+                        print(f"⚠️  No funding rate data available for {self.market}")
+                        return None
+                else:
+                    print(f"❌ Failed to fetch funding rate: HTTP {response.status}")
+                    return None
+
+        except Exception as e:
+            print(f"❌ Error fetching Lighter funding rate: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+
     async def cancel_order(self, order_id: str) -> bool:
         """
         Cancel an order

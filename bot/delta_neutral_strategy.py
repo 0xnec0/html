@@ -112,6 +112,134 @@ class DeltaNeutralStrategy:
             # Wait before next check
             await asyncio.sleep(check_interval)
 
+    async def _check_funding_rate_opportunity(self) -> Optional[Dict[str, Any]]:
+        """
+        Check if there's a funding rate arbitrage opportunity
+
+        Lighter: Hourly discrete funding with ±0.5% cap
+        Paradex: Continuous funding (pro-rated) with ±5% annual cap
+
+        Returns:
+            Dict with funding rate analysis and recommendation:
+            {
+                'opportunity': bool,  # True if should open position
+                'lighter_rate': float,
+                'paradex_rate': float,
+                'rate_diff_pct': float,
+                'estimated_apy': float,
+                'recommendation': str,  # 'LIGHTER_SHORT' or 'LIGHTER_LONG' or 'NO_POSITION'
+                'reason': str
+            }
+            or None if error
+        """
+        if not self.bot.config.funding_rate_enabled:
+            return {
+                'opportunity': True,  # Bypass check if disabled
+                'lighter_rate': 0,
+                'paradex_rate': 0,
+                'rate_diff_pct': 0,
+                'estimated_apy': 0,
+                'recommendation': 'NO_CHECK',
+                'reason': 'Funding rate check disabled in config'
+            }
+
+        print(f"\n💹 ファンディングレートアービトラージ機会をチェック中...")
+
+        try:
+            # Get funding rates from both exchanges
+            lighter_funding = await self.bot.lighter.get_funding_rate()
+            paradex_funding = await self.bot.paradex.get_funding_rate()
+
+            if not lighter_funding or not paradex_funding:
+                print("⚠️  ファンディングレート取得失敗、スキップします")
+                return {
+                    'opportunity': True,  # Proceed anyway
+                    'lighter_rate': 0,
+                    'paradex_rate': 0,
+                    'rate_diff_pct': 0,
+                    'estimated_apy': 0,
+                    'recommendation': 'DATA_UNAVAILABLE',
+                    'reason': 'Could not fetch funding rates'
+                }
+
+            # Extract rates (convert to comparable format)
+            # Lighter: hourly rate, Paradex: 8-hour rate
+            lighter_rate_hourly = lighter_funding['funding_rate']
+            paradex_rate_8h = paradex_funding['funding_rate']
+
+            # Convert Paradex 8-hour rate to hourly for comparison
+            paradex_rate_hourly = paradex_rate_8h / 8
+
+            print(f"   Lighter: {lighter_rate_hourly*100:.4f}%/時 (離散型)")
+            print(f"   Paradex: {paradex_rate_hourly*100:.4f}%/時 (連続型、{paradex_rate_8h*100:.4f}%/8時間)")
+
+            # Calculate absolute difference
+            rate_diff = abs(lighter_rate_hourly - paradex_rate_hourly)
+            rate_diff_pct = rate_diff * 100  # Convert to percentage
+
+            # Estimate annual yield (conservative: 16 hours/day holding, 250 trading days)
+            # Lighter discrete: full hour payment, Paradex: pro-rated
+            hours_per_year = 16 * 250  # Conservative estimate
+            estimated_apy = rate_diff * hours_per_year * 100  # As percentage
+
+            print(f"   差額: {rate_diff_pct:.4f}%/時")
+            print(f"   推定APY: {estimated_apy:.2f}%")
+
+            # Decision logic
+            min_diff_pct = self.bot.config.funding_rate_min_diff_pct
+            target_apy = self.bot.config.funding_rate_target_apy
+
+            if rate_diff_pct < min_diff_pct:
+                print(f"   ⚠️  差額が閾値未満 ({min_diff_pct}%)")
+                return {
+                    'opportunity': False,
+                    'lighter_rate': lighter_rate_hourly,
+                    'paradex_rate': paradex_rate_hourly,
+                    'rate_diff_pct': rate_diff_pct,
+                    'estimated_apy': estimated_apy,
+                    'recommendation': 'NO_POSITION',
+                    'reason': f'Rate difference {rate_diff_pct:.4f}% below threshold {min_diff_pct}%'
+                }
+
+            # Determine position direction
+            if lighter_rate_hourly > paradex_rate_hourly:
+                # Lighter has higher rate → SHORT on Lighter, LONG on Paradex
+                recommendation = 'LIGHTER_SHORT'
+                reason = f'Lighter rate ({lighter_rate_hourly*100:.4f}%) > Paradex rate ({paradex_rate_hourly*100:.4f}%)'
+            else:
+                # Paradex has higher rate → LONG on Lighter, SHORT on Paradex
+                # But our strategy is fixed (Paradex LONG + Lighter SHORT)
+                # So we reverse: if Paradex rate > Lighter rate, we still do our standard strategy
+                recommendation = 'LIGHTER_SHORT'  # Keep standard strategy
+                reason = f'Using standard strategy (Paradex LONG + Lighter SHORT)'
+
+            print(f"   ✅ 機会あり: {recommendation}")
+            print(f"   理由: {reason}")
+
+            return {
+                'opportunity': True,
+                'lighter_rate': lighter_rate_hourly,
+                'paradex_rate': paradex_rate_hourly,
+                'rate_diff_pct': rate_diff_pct,
+                'estimated_apy': estimated_apy,
+                'recommendation': recommendation,
+                'reason': reason
+            }
+
+        except Exception as e:
+            print(f"❌ ファンディングレートチェックエラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'opportunity': True,  # Proceed anyway on error
+                'lighter_rate': 0,
+                'paradex_rate': 0,
+                'rate_diff_pct': 0,
+                'estimated_apy': 0,
+                'recommendation': 'ERROR',
+                'reason': f'Error checking funding rates: {e}'
+            }
+
     def _save_position_to_file(self):
         """Save current position to file for emergency close"""
         try:
@@ -790,6 +918,18 @@ class DeltaNeutralStrategy:
 
         avg_price = (paradex_price + lighter_price) / 2
 
+        # Check funding rate arbitrage opportunity
+        funding_check = await self._check_funding_rate_opportunity()
+
+        if funding_check and not funding_check['opportunity']:
+            print(f"⚠️  ファンディングレート機会なし: {funding_check['reason']}")
+            return {'success': False, 'error': 'No funding rate opportunity', 'funding_check': funding_check}
+
+        if funding_check and funding_check['opportunity']:
+            print(f"✅ ファンディングレート機会あり!")
+            print(f"   推定APY: {funding_check['estimated_apy']:.2f}%")
+            print(f"   戦略: {funding_check['recommendation']}")
+
         # Calculate position size
         if self.usd_amount:
             # Calculate position size for each exchange to match USD amount as closely as possible
@@ -1027,6 +1167,7 @@ class DeltaNeutralStrategy:
                 'paradex_price': paradex_price,
                 'lighter_price': lighter_price,
                 'fill_ratio': min(paradex_total_filled/target_size, lighter_total_filled/target_size) * 100,
+                'funding_check': funding_check,  # Save funding rate analysis
             }
 
             # Save position to file for emergency close

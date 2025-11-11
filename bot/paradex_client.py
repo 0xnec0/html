@@ -389,6 +389,114 @@ class ParadexClient:
             print(f"❌ Paradex balance error: {e}")
             return None
 
+    async def get_funding_rate(self) -> Optional[Dict[str, Any]]:
+        """
+        Get current funding rate for the market
+
+        Paradex uses continuous funding (pro-rated by holding time) with ±5% annual cap
+
+        Returns:
+            Dict with funding rate data:
+            {
+                'funding_rate': float,  # 8-hour funding rate (e.g., 0.0001 = 0.01%)
+                'funding_rate_pct': float,  # As percentage (e.g., 0.01)
+                'funding_rate_annual': float,  # Annualized rate
+                'next_funding_time': int,  # Unix timestamp
+                'market': str
+            }
+            or None if error
+        """
+        try:
+            # Try SDK first if available
+            if self.client:
+                try:
+                    # Paradex SDK may have fetch_markets_summary or similar
+                    markets = self.client.api_client.fetch_markets()
+                    if markets:
+                        # Find our market
+                        for market in markets:
+                            if market.get('symbol') == self.market or market.get('market') == self.market:
+                                funding_rate = float(market.get('funding_rate', 0))
+
+                                # Paradex uses 8-hour funding periods (3 times per day)
+                                return {
+                                    'funding_rate': funding_rate,
+                                    'funding_rate_pct': funding_rate * 100,
+                                    'funding_rate_annual': funding_rate * 3 * 365 * 100,  # Annualized %
+                                    'next_funding_time': market.get('next_funding_time', 0),
+                                    'market': self.market,
+                                    'source': 'SDK'
+                                }
+                except Exception as sdk_error:
+                    print(f"ℹ️  SDK funding rate query failed, falling back to REST API: {sdk_error}")
+
+            # Fallback to REST API - try multiple endpoints
+            endpoints_to_try = [
+                f"/markets/{self.market}",
+                "/markets/summary",
+                "/markets"
+            ]
+
+            for endpoint in endpoints_to_try:
+                try:
+                    data = await self._make_request("GET", endpoint, signed=False)
+
+                    if not data:
+                        continue
+
+                    # Handle different response structures
+                    market_data = None
+
+                    if isinstance(data, dict):
+                        # Single market response
+                        if data.get('symbol') == self.market or data.get('market') == self.market:
+                            market_data = data
+                        # Summary with results array
+                        elif 'results' in data:
+                            for market in data['results']:
+                                if market.get('symbol') == self.market or market.get('market') == self.market:
+                                    market_data = market
+                                    break
+                    elif isinstance(data, list):
+                        # Array of markets
+                        for market in data:
+                            if market.get('symbol') == self.market or market.get('market') == self.market:
+                                market_data = market
+                                break
+
+                    if market_data:
+                        # Extract funding rate (field name may vary)
+                        funding_rate = float(market_data.get('funding_rate',
+                                            market_data.get('fundingRate',
+                                            market_data.get('funding', 0))))
+
+                        next_funding = market_data.get('next_funding_time',
+                                                      market_data.get('nextFundingTime',
+                                                      market_data.get('funding_timestamp', 0)))
+
+                        return {
+                            'funding_rate': funding_rate,
+                            'funding_rate_pct': funding_rate * 100,
+                            'funding_rate_annual': funding_rate * 3 * 365 * 100,  # Annualized %
+                            'next_funding_time': next_funding,
+                            'market': self.market,
+                            'source': f'REST:{endpoint}'
+                        }
+
+                except Exception as e:
+                    # Try next endpoint
+                    continue
+
+            print(f"⚠️  Could not find funding rate for {self.market} on Paradex")
+            print(f"   Tried endpoints: {endpoints_to_try}")
+            return None
+
+        except Exception as e:
+            print(f"❌ Error fetching Paradex funding rate: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     async def cancel_order(self, order_id: str) -> bool:
         """
         Cancel an order
