@@ -1199,9 +1199,18 @@ class LighterClient:
 
             self._latest_account = account
 
+            # Debug: Show account update received
+            if self._initial_position_size is not None:
+                print(f"\n🔔 WS: Account update received (tracking active)")
+
             # Check for position changes
             if isinstance(account, dict):
                 positions = account.get('positions', []) or account.get('perp_positions', [])
+
+                # Debug: Show positions array
+                if self._initial_position_size is not None:
+                    print(f"   Positions array length: {len(positions)}")
+
                 if positions:
                     for pos in positions:
                         # Handle pos as both dict and string
@@ -1210,15 +1219,32 @@ class LighterClient:
 
                         if isinstance(pos, dict):
                             size = abs(float(pos.get('size', 0) or pos.get('amount', 0)))
+
+                            # Debug: Show position details when tracking
+                            if self._initial_position_size is not None:
+                                print(f"   Position size: {size} | Initial: {self._initial_position_size}")
+
                             if size > 0:
                                 # Position detected - check if it changed
                                 if self._initial_position_size is not None:
-                                    if size > self._initial_position_size:
+                                    # Changed logic: ANY size change (increase OR decrease) triggers event
+                                    # Also trigger if initial was 0 and now we have a position
+                                    size_changed = (size != self._initial_position_size)
+
+                                    if size_changed:
                                         print(f"\n✅ WS: Position change detected! {self._initial_position_size} → {size}")
                                         self._position_event.set()  # Signal position change
                                 break
+                else:
+                    # No positions but we're tracking - check if we had a position before
+                    if self._initial_position_size is not None and self._initial_position_size > 0:
+                        print(f"\n✅ WS: Position closed! {self._initial_position_size} → 0")
+                        self._position_event.set()
+
         except Exception as e:
             print(f"\n⚠️  WebSocket account error: {e} | Type: {type(account)}")
+            import traceback
+            traceback.print_exc()
 
     async def stop_websocket(self):
         """Stop WebSocket connection"""
