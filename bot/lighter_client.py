@@ -208,12 +208,32 @@ class LighterClient:
                     if response.status == 200:
                         data = await response.json()
 
+                        # DEBUG: Print API response structure
+                        if not hasattr(self, '_api_structure_logged'):
+                            print(f"\n🔍 DEBUG: Lighter API Response Structure")
+                            print(f"   URL: {url}")
+                            print(f"   Response type: {type(data)}")
+                            if isinstance(data, dict):
+                                print(f"   Keys: {list(data.keys())}")
+                                if 'order_book_details' in data:
+                                    print(f"   order_book_details count: {len(data['order_book_details'])}")
+                                    if len(data['order_book_details']) > 0:
+                                        first = data['order_book_details'][0]
+                                        print(f"   First market keys: {list(first.keys())}")
+                                        print(f"   First market symbol: {first.get('symbol')}")
+                            self._api_structure_logged = True
+
                         # Extract bid/ask from orderBookDetails response
                         if isinstance(data, dict) and 'order_book_details' in data:
                             for book in data['order_book_details']:
                                 symbol = book.get('symbol', '')
 
                                 if symbol.upper() == self.market.upper():
+                                    # DEBUG: Market found
+                                    if not hasattr(self, '_market_found_logged'):
+                                        print(f"✓ Found market: {symbol}")
+                                        print(f"   Market keys: {list(book.keys())}")
+                                        self._market_found_logged = True
                                     # Get best bid (highest buy price) and best ask (lowest sell price)
                                     asks = book.get('asks', [])
                                     bids = book.get('bids', [])
@@ -236,7 +256,10 @@ class LighterClient:
                                         # Return None to signal no liquidity - caller should retry
                                         return None
 
+                            # DEBUG: Show available markets if target not found
+                            available = [book.get('symbol') for book in data['order_book_details']]
                             print(f"❌ Market '{self.market}' not found!")
+                            print(f"   Available markets: {', '.join(available[:10])}")
                         else:
                             print(f"❌ Invalid response structure")
                         return None
