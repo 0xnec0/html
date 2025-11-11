@@ -209,6 +209,44 @@ class DeltaNeutralStrategy:
 
         return balances
 
+    async def _cancel_all_pending_orders(self, all_order_ids: list, filled_order_id: str = None) -> None:
+        """
+        Cancel all pending orders except the filled one
+
+        Args:
+            all_order_ids: List of all order IDs that were placed
+            filled_order_id: Order ID that was filled (optional, will not be cancelled)
+        """
+        if not all_order_ids:
+            return
+
+        print(f"\n🗑️  未約定注文をキャンセル中... ({len(all_order_ids)}個)")
+
+        cancelled_count = 0
+        failed_count = 0
+
+        for order_id in all_order_ids:
+            # Skip the filled order
+            if filled_order_id and order_id == filled_order_id:
+                continue
+
+            try:
+                success = await self.bot.lighter.cancel_order(str(order_id))
+                if success:
+                    cancelled_count += 1
+                    print(f"   ✓ キャンセル成功: {order_id}")
+                else:
+                    failed_count += 1
+                    print(f"   ⚠️  キャンセル失敗: {order_id}")
+            except Exception as e:
+                failed_count += 1
+                print(f"   ❌ キャンセルエラー {order_id}: {e}")
+
+            # Small delay to avoid rate limiting
+            await asyncio.sleep(0.1)
+
+        print(f"   完了: 成功 {cancelled_count}, 失敗 {failed_count}")
+
     async def _wait_for_lighter_fill_via_websocket(self, initial_position_size: float, target_size: float, timeout: int = 30) -> bool:
         """
         Wait for order to fill by monitoring position changes via WebSocket
@@ -331,6 +369,7 @@ class DeltaNeutralStrategy:
                 use_websocket = False
 
         current_order_id = None
+        all_order_ids = []  # Track all placed orders for cleanup
 
         for attempt in range(1, max_attempts + 1):
             print(f"\n{'='*60}")
@@ -367,6 +406,7 @@ class DeltaNeutralStrategy:
 
             current_order_id = order_result.get('order_id')
             tx_hash = order_result.get('tx_hash')
+            all_order_ids.append(current_order_id)  # Track this order
 
             print(f"   ✓ 注文送信完了")
             print(f"   Order ID: {current_order_id}")
@@ -385,6 +425,8 @@ class DeltaNeutralStrategy:
 
                 if filled:
                     print(f"   ✅ 注文約定完了！")
+                    # Cancel all other pending orders
+                    await self._cancel_all_pending_orders(all_order_ids, current_order_id)
                     return {
                         **order_result,
                         'filled_size': size,
@@ -398,6 +440,8 @@ class DeltaNeutralStrategy:
 
                 if tx_hash:
                     print(f"   ✅ 注文約定完了！")
+                    # Cancel all other pending orders
+                    await self._cancel_all_pending_orders(all_order_ids, current_order_id)
                     return {
                         **order_result,
                         'filled_size': size,
@@ -409,9 +453,8 @@ class DeltaNeutralStrategy:
 
         # Max attempts reached
         print(f"\n❌ 最大試行回数到達 - Lighter注文失敗")
-        if current_order_id:
-            print(f"   最終注文をキャンセル中...")
-            await self.bot.lighter.cancel_order(str(current_order_id))
+        # Cancel all pending orders
+        await self._cancel_all_pending_orders(all_order_ids)
 
         return None
 
