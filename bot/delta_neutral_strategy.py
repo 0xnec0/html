@@ -45,43 +45,32 @@ class DeltaNeutralStrategy:
             Dictionary with 'paradex' and 'lighter' sides ('LONG' or 'SHORT')
             Example: {'paradex': 'LONG', 'lighter': 'SHORT'}
         """
-        print(f"\n💰 資金調達率を確認中...")
+        print(f"\n💰 Funding Rate Check...")
 
         # Get funding rates from both exchanges
         paradex_funding = await self.bot.paradex.get_funding_rate()
         lighter_funding = await self.bot.lighter.get_funding_rate()
 
-        print(f"   Paradex funding rate: {paradex_funding*100:.4f}% / 8h" if paradex_funding is not None else "   Paradex funding rate: N/A")
-        print(f"   Lighter funding rate: {lighter_funding*100:.4f}% / 8h" if lighter_funding is not None else "   Lighter funding rate: N/A")
+        print(f"   Paradex: {paradex_funding*100:.4f}% / 8h" if paradex_funding is not None else "   Paradex: N/A")
+        print(f"   Lighter: {lighter_funding*100:.4f}% / 8h" if lighter_funding is not None else "   Lighter: N/A")
 
         # If we can't get funding rates, use default (Paradex LONG + Lighter SHORT)
         if paradex_funding is None or lighter_funding is None:
-            print(f"   ⚠️  資金調達率取得失敗 - デフォルト戦略を使用")
-            print(f"   Default: Paradex LONG + Lighter SHORT")
+            print(f"   ⚠️  Using default strategy (Paradex LONG + Lighter SHORT)")
             return {'paradex': 'LONG', 'lighter': 'SHORT'}
 
         # Calculate net funding cost for both combinations
         # Option A: Paradex LONG + Lighter SHORT
-        # - If Paradex funding > 0: LONG pays (cost)
-        # - If Lighter funding > 0: SHORT receives (profit)
         option_a_cost = paradex_funding - lighter_funding
-
         # Option B: Paradex SHORT + Lighter LONG
-        # - If Paradex funding > 0: SHORT receives (profit)
-        # - If Lighter funding > 0: LONG pays (cost)
         option_b_cost = -paradex_funding + lighter_funding
-
-        print(f"\n   オプションA (Paradex LONG + Lighter SHORT): {option_a_cost*100:.4f}% / 8h")
-        print(f"   オプションB (Paradex SHORT + Lighter LONG): {option_b_cost*100:.4f}% / 8h")
 
         # Choose the option with lower cost (more negative = better)
         if option_a_cost <= option_b_cost:
-            print(f"   ✅ 最適: オプションA (Paradex LONG + Lighter SHORT)")
-            print(f"   予想コスト: {option_a_cost*100:.4f}% / 8h")
+            print(f"   ✅ Strategy: Paradex LONG + Lighter SHORT (cost: {option_a_cost*100:.4f}% / 8h)")
             return {'paradex': 'LONG', 'lighter': 'SHORT'}
         else:
-            print(f"   ✅ 最適: オプションB (Paradex SHORT + Lighter LONG)")
-            print(f"   予想コスト: {option_b_cost*100:.4f}% / 8h")
+            print(f"   ✅ Strategy: Paradex SHORT + Lighter LONG (cost: {option_b_cost*100:.4f}% / 8h)")
             return {'paradex': 'SHORT', 'lighter': 'LONG'}
 
     async def _wait_for_tight_spread(self, max_spread_pct: float, check_interval: float, timeout: float) -> Optional[tuple]:
@@ -522,19 +511,11 @@ class DeltaNeutralStrategy:
         print("\n" + "="*60)
         print("🎯 Opening Delta Neutral Position")
         print("="*60)
-        print("   Strategy: Paradex LONG + Lighter SHORT")
-        print(f"   Leverage: {self.leverage}x")
-        print(f"   Capital: {self.capital_percentage*100}%")
 
         # Get and display current balances
-        print("\n💰 Checking current balances...")
         balances = await self.get_available_balance()
         paradex_balance = balances.get('paradex', 0)
         lighter_balance = balances.get('lighter', 0)
-
-        print(f"   Paradex: ${paradex_balance:.2f}")
-        print(f"   Lighter:  ${lighter_balance:.2f}")
-        print(f"   Total:    ${paradex_balance + lighter_balance:.2f}")
 
         # Get spread monitoring configuration
         max_spread_pct = self.bot.config.spread_max_pct
@@ -602,30 +583,20 @@ class DeltaNeutralStrategy:
                 paradex_position_size = position_size
                 lighter_position_size = position_size
 
-        print(f"\n📊 Executing delta neutral strategy (SEQUENTIAL ORDER FLOW)")
-        print(f"   Strategy: Lighter指値注文 → 約定検知 → Paradex成行注文")
-        print(f"   Paradex: {paradex_side} {paradex_position_size} units @ ${paradex_price:.4f}")
-        print(f"   Lighter: {lighter_side} {lighter_position_size} units @ ${lighter_price:.4f}")
-
         # Convert LONG/SHORT to BUY/SELL
         paradex_order_side = 'BUY' if paradex_side == 'LONG' else 'SELL'
         lighter_order_side = 'BUY' if lighter_side == 'LONG' else 'SELL'
 
+        print(f"\n📊 Opening: Lighter {lighter_order_side} {lighter_position_size} → Paradex {paradex_order_side} {paradex_position_size}")
+        print(f"   Prices: Paradex ${paradex_price:.4f} | Lighter ${lighter_price:.4f}")
+
         # Get Lighter order configuration
         lighter_spread_max = self.bot.config.lighter_spread_max_pct
         lighter_timeout = self.bot.config.lighter_order_timeout
+        use_websocket = self.bot.config.lighter_use_websocket
 
         # STEP 1: Place Lighter limit order with spread check
-        print(f"\n{'='*60}")
-        print(f"STEP 1: Lighter指値注文（スプレッド監視）")
-        print(f"{'='*60}")
-        print(f"   Side: {lighter_order_side} | Size: {lighter_position_size}")
-        print(f"   最大スプレッド: {lighter_spread_max}%")
-        print(f"   タイムアウト: {lighter_timeout}秒" if lighter_timeout > 0 else "   タイムアウト: なし")
-
-        # Use WebSocket or polling based on config
-        use_websocket = self.bot.config.lighter_use_websocket
-        print(f"   接続方式: {'WebSocket' if use_websocket else 'ポーリング'}")
+        print(f"\n▶ STEP 1: Lighter Limit Order ({lighter_order_side} {lighter_position_size} | Max Spread: {lighter_spread_max}% | {'WebSocket' if use_websocket else 'Polling'})")
 
         if use_websocket:
             lighter_result = await self.bot.lighter.place_limit_order_with_spread_check_ws(
@@ -651,37 +622,28 @@ class DeltaNeutralStrategy:
             }
 
         lighter_order_id = lighter_result.get('order_id')
-        print(f"\n✅ Lighter注文送信成功！ Order ID: {lighter_order_id}")
+        print(f"\n✅ Order placed | ID: {lighter_order_id}")
 
         # STEP 2: Wait for Lighter order fill
-        print(f"\n{'='*60}")
-        print(f"STEP 2: Lighter約定待機")
-        print(f"{'='*60}")
+        print(f"\n▶ STEP 2: Waiting for Fill...")
 
         # Get initial position size for WebSocket tracking
-        print(f"\n📊 初期ポジション確認中...")
         initial_pos = await self.bot.lighter.get_position()
         initial_size = abs(initial_pos.get('size', 0)) if initial_pos else 0
-        print(f"   初期サイズ: {initial_size}")
-
         fill_timeout = lighter_timeout if lighter_timeout > 0 else 60.0
 
         if use_websocket:
-            print(f"   WebSocket方式で約定待機")
             filled = await self.bot.lighter.wait_for_order_fill_ws(
                 order_id=lighter_order_id,
                 initial_size=initial_size,
                 timeout=fill_timeout
             )
         else:
-            print(f"   ポーリング方式で約定待機")
             filled = await self.bot.lighter.wait_for_order_fill(
                 order_id=lighter_order_id,
                 check_interval=2.0,
                 timeout=fill_timeout
             )
-
-        print(f"\n🔍 約定結果チェック: filled = {filled}")
 
         if not filled:
             print(f"\n❌ Lighter約定タイムアウト")
@@ -693,23 +655,16 @@ class DeltaNeutralStrategy:
                 'error': 'Lighter order fill timeout'
             }
 
-        print(f"\n✅ Lighter約定確認！")
-        print(f"   → STEP 3（Paradex注文）に進みます...")
+        print(f"\n✅ Filled!")
 
         # STEP 3: Immediately place Paradex market order
-        print(f"\n{'='*60}")
-        print(f"STEP 3: Paradex成行注文（即時実行）")
-        print(f"{'='*60}")
-        print(f"   Side: {paradex_order_side} | Size: {paradex_position_size}")
-        print(f"   Type: Market order (スプレッド無視)")
+        print(f"\n▶ STEP 3: Paradex Market Order ({paradex_order_side} {paradex_position_size} @ Market)")
 
         try:
-            print(f"\n📤 Paradex注文を送信中...")
             paradex_result = await self.bot.paradex.place_market_order(
                 paradex_order_side,
                 paradex_position_size
             )
-            print(f"📥 Paradex注文レスポンス: {paradex_result}")
         except Exception as e:
             print(f"\n❌ Paradex注文で例外発生: {e}")
             import traceback
@@ -759,26 +714,11 @@ class DeltaNeutralStrategy:
         lighter_filled_size = await self._verify_filled_size(lighter_result, lighter_position_size, "Lighter")
 
         print(f"\n✅ 両取引所で約定完了!")
-        print(f"\n📊 Paradex (LONG):")
-        print(f"   目標: {paradex_position_size:.2f}")
-        print(f"   約定サイズ: {paradex_filled_size:.2f}")
-        print(f"   約定価格: ${paradex_price:.4f}")
-        print(f"   約定USD: ${paradex_filled_size * paradex_price:.2f}")
-
-        print(f"\n📊 Lighter (SHORT):")
-        print(f"   目標: {lighter_position_size:.2f}")
-        print(f"   約定サイズ: {lighter_filled_size:.2f}")
-        print(f"   約定価格: ${lighter_price:.4f}")
-        print(f"   約定USD: ${lighter_filled_size * lighter_price:.2f}")
+        print(f"   Paradex: {paradex_filled_size:.2f}/{paradex_position_size:.2f} @ ${paradex_price:.4f} (${paradex_filled_size * paradex_price:.2f})")
+        print(f"   Lighter: {lighter_filled_size:.2f}/{lighter_position_size:.2f} @ ${lighter_price:.4f} (${lighter_filled_size * lighter_price:.2f})")
 
         # Step 2: Check for size mismatch and apply hybrid adjustment if needed
-        print(f"\n{'='*60}")
-        print(f"STEP 2: ポジションサイズ確認")
-        print(f"{'='*60}")
-        print(f"   Paradex: {paradex_filled_size:.2f} / {paradex_position_size:.2f} (目標)")
-        print(f"   Lighter: {lighter_filled_size:.2f} / {lighter_position_size:.2f} (目標)")
-        print(f"   Paradex誤差: {abs(paradex_filled_size - paradex_position_size):.2f}")
-        print(f"   Lighter誤差: {abs(lighter_filled_size - lighter_position_size):.2f}")
+        print(f"\n📊 Position Size Check: Paradex {paradex_filled_size:.2f}/{paradex_position_size:.2f} | Lighter {lighter_filled_size:.2f}/{lighter_position_size:.2f}")
 
         paradex_total_filled = paradex_filled_size
         lighter_total_filled = lighter_filled_size
@@ -919,15 +859,7 @@ class DeltaNeutralStrategy:
             # Save position to file for emergency close
             self._save_position_to_file()
 
-            print("\n" + "="*60)
-            print("✅ Delta neutral position opened successfully!")
-            print("="*60)
-            print(f"   Paradex target: {paradex_position_size:.2f}")
-            print(f"   Paradex filled: {paradex_total_filled:.2f} ({paradex_total_filled/paradex_position_size*100:.1f}%)")
-            print(f"   Lighter target: {lighter_position_size:.2f}")
-            print(f"   Lighter filled: {lighter_total_filled:.2f} ({lighter_total_filled/lighter_position_size*100:.1f}%)")
-            print(f"   Position size (for close-all): {actual_position_size:.2f}")
-            print("="*60)
+            print(f"\n✅ Position Opened: Paradex {paradex_total_filled:.2f}/{paradex_position_size:.2f} ({paradex_total_filled/paradex_position_size*100:.0f}%) | Lighter {lighter_total_filled:.2f}/{lighter_position_size:.2f} ({lighter_total_filled/lighter_position_size*100:.0f}%)")
 
             # Send Discord notification with balance info
             notification_data = {
@@ -984,14 +916,9 @@ class DeltaNeutralStrategy:
         print(f"   Lighter ({lighter_side}): {lighter_position_size:.2f} units")
 
         # Get and display current balances before closing
-        print("\n💰 Checking current balances...")
         balances = await self.get_available_balance()
         paradex_balance = balances.get('paradex', 0)
         lighter_balance = balances.get('lighter', 0)
-
-        print(f"   Paradex: ${paradex_balance:.2f}")
-        print(f"   Lighter:  ${lighter_balance:.2f}")
-        print(f"   Total:    ${paradex_balance + lighter_balance:.2f}")
 
         # Get spread monitoring configuration
         max_spread_pct = self.bot.config.spread_max_pct
@@ -1022,33 +949,17 @@ class DeltaNeutralStrategy:
         paradex_close_side = 'SELL' if paradex_side == 'LONG' else 'BUY'
         lighter_close_side = 'SELL' if lighter_side == 'LONG' else 'BUY'
 
-        print(f"\n📊 Closing positions (SEQUENTIAL ORDER FLOW)...")
-        print(f"   Strategy: Lighter指値注文 → 約定検知 → Paradex成行注文")
-        if paradex_price:
-            print(f"   Paradex: {paradex_close_side} {paradex_position_size:.2f} @ ${paradex_price:.4f} (Close {paradex_side})")
-        else:
-            print(f"   Paradex: {paradex_close_side} {paradex_position_size:.2f} @ (price unavailable) (Close {paradex_side})")
-
-        if lighter_price:
-            print(f"   Lighter: {lighter_close_side} {lighter_position_size:.2f} @ ${lighter_price:.4f} (Close {lighter_side})")
-        else:
-            print(f"   Lighter: {lighter_close_side} {lighter_position_size:.2f} @ (price unavailable) (Close {lighter_side})")
+        print(f"\n📊 Closing: Lighter {lighter_close_side} {lighter_position_size:.2f} → Paradex {paradex_close_side} {paradex_position_size:.2f}")
+        if paradex_price and lighter_price:
+            print(f"   Prices: Paradex ${paradex_price:.4f} | Lighter ${lighter_price:.4f}")
 
         # Get Lighter order configuration
         lighter_spread_max = self.bot.config.lighter_spread_max_pct
         lighter_timeout = self.bot.config.lighter_order_timeout
 
         # STEP 1: Place Lighter limit order with spread check
-        print(f"\n{'='*60}")
-        print(f"STEP 1: Lighter指値注文（スプレッド監視）")
-        print(f"{'='*60}")
-        print(f"   Side: {lighter_close_side} | Size: {lighter_position_size}")
-        print(f"   最大スプレッド: {lighter_spread_max}%")
-        print(f"   タイムアウト: {lighter_timeout}秒" if lighter_timeout > 0 else "   タイムアウト: なし")
-
-        # Use WebSocket or polling based on config
         use_websocket = self.bot.config.lighter_use_websocket
-        print(f"   接続方式: {'WebSocket' if use_websocket else 'ポーリング'}")
+        print(f"\n▶ STEP 1: Lighter Close ({lighter_close_side} {lighter_position_size} | Max Spread: {lighter_spread_max}% | {'WebSocket' if use_websocket else 'Polling'})")
 
         if use_websocket:
             lighter_result = await self.bot.lighter.place_limit_order_with_spread_check_ws(
@@ -1082,9 +993,7 @@ class DeltaNeutralStrategy:
         print(f"\n✅ Lighter注文送信成功！ Order ID: {lighter_order_id}")
 
         # STEP 2: Wait for Lighter order fill
-        print(f"\n{'='*60}")
-        print(f"STEP 2: Lighter約定待機")
-        print(f"{'='*60}")
+        print(f"\n▶ STEP 2: Waiting for Fill...")
 
         # Get initial position size for WebSocket tracking
         initial_pos = await self.bot.lighter.get_position()
@@ -1122,11 +1031,7 @@ class DeltaNeutralStrategy:
         print(f"\n✅ Lighterクローズ約定確認！")
 
         # STEP 3: Immediately place Paradex market order
-        print(f"\n{'='*60}")
-        print(f"STEP 3: Paradex成行注文（即時実行）")
-        print(f"{'='*60}")
-        print(f"   Side: {paradex_close_side} | Size: {paradex_position_size}")
-        print(f"   Type: Market order (スプレッド無視)")
+        print(f"\n▶ STEP 3: Paradex Market Close ({paradex_close_side} {paradex_position_size})")
 
         paradex_result = await self.bot.paradex.place_market_order(
             paradex_close_side,
@@ -1148,18 +1053,7 @@ class DeltaNeutralStrategy:
             lighter_pnl = (entry_lighter_price - lighter_price) * lighter_position_size
             total_pnl = paradex_pnl + lighter_pnl
 
-            print(f"\n💵 P&L Summary:")
-            print(f"   Paradex (LONG):")
-            print(f"      Size: {paradex_position_size:.2f}")
-            print(f"      Entry: ${entry_paradex_price:.4f}")
-            print(f"      Exit: ${paradex_price:.4f}")
-            print(f"      P&L: ${paradex_pnl:.2f}")
-            print(f"   Lighter (SHORT):")
-            print(f"      Size: {lighter_position_size:.2f}")
-            print(f"      Entry: ${entry_lighter_price:.4f}")
-            print(f"      Exit: ${lighter_price:.4f}")
-            print(f"      P&L: ${lighter_pnl:.2f}")
-            print(f"   Total P&L: ${total_pnl:.2f}")
+            print(f"\n💵 P&L: Paradex ${paradex_pnl:.2f} | Lighter ${lighter_pnl:.2f} | Total ${total_pnl:.2f}")
 
             # Save to history with independent sizes
             trade_data = {
@@ -1215,11 +1109,8 @@ class DeltaNeutralStrategy:
             max_cycles: Maximum number of cycles (None = infinite)
         """
         print("\n" + "="*60)
-        print("🔁 Starting Delta Neutral Auto Loop")
+        print("🔁 Starting Automated Trading Loop")
         print("="*60)
-        print(f"   Hold time: {hold_time_hours[0]}-{hold_time_hours[1]} hours")
-        print(f"   Leverage: {self.leverage}x")
-        print(f"   Capital: {self.capital_percentage*100}%")
         if max_cycles:
             print(f"   Max cycles: {max_cycles}")
         else:
