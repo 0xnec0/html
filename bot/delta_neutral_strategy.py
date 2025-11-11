@@ -33,9 +33,16 @@ class DeltaNeutralStrategy:
         self.leverage = leverage
         self.capital_percentage = capital_percentage
         self.usd_amount = usd_amount
-        self.position_open = False
-        self.current_position = None
         self.notifier = DiscordNotifier()
+
+        # Load existing position from file if it exists
+        self.current_position = self.load_current_position()
+        self.position_open = self.current_position is not None
+
+        if self.position_open:
+            print(f"ℹ️  既存のオープンポジションを検知しました:")
+            print(f"   サイズ: {self.current_position.get('size', 'N/A')}")
+            print(f"   タイムスタンプ: {self.current_position.get('timestamp', 'N/A')}")
 
     async def _wait_for_tight_spread(self, max_spread_pct: float, check_interval: float, timeout: float) -> Optional[tuple]:
         """
@@ -720,6 +727,12 @@ class DeltaNeutralStrategy:
         Returns:
             Results of position opening
         """
+        # Safety check: prevent opening multiple positions
+        if self.position_open:
+            print("⚠️  ポジションは既にオープンしています。先に決済してください。")
+            print(f"   現在のポジションサイズ: {self.current_position.get('size', 'N/A')}")
+            return {'success': False, 'error': 'Position already open'}
+
         print("\n" + "="*60)
         print("🎯 Opening Delta Neutral Position")
         print("="*60)
@@ -1239,6 +1252,13 @@ class DeltaNeutralStrategy:
         # Send loop started notification
         await self.notifier.send_loop_started(self.leverage, self.capital_percentage, max_cycles)
 
+        # If a position already exists at startup, close it first
+        if self.position_open:
+            print("\n⚠️  既存のポジションを先に決済します...")
+            await self.close_delta_neutral_position()
+            print("\n⏸️  Waiting 30 seconds before starting loop...")
+            await asyncio.sleep(30)
+
         cycle = 0
 
         try:
@@ -1289,12 +1309,17 @@ class DeltaNeutralStrategy:
                 print("\n⏸️  Waiting 30 seconds before next cycle...")
                 await asyncio.sleep(30)
 
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, asyncio.CancelledError):
             print("\n\n⚠️  Loop interrupted by user")
             await self.notifier.send_loop_stopped("Interrupted by user")
             if self.position_open:
                 print("🔄 Closing open position...")
-                await self.close_delta_neutral_position()
+                try:
+                    await self.close_delta_neutral_position()
+                except Exception as e:
+                    print(f"❌ Error closing position: {e}")
+                    print("⚠️  Manual intervention may be required")
+            raise  # Re-raise to ensure proper cleanup
         except Exception as e:
             print(f"\n❌ Error in loop: {e}")
             await self.notifier.send_error(f"Loop error: {e}", "Bot stopped due to error")

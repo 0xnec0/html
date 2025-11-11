@@ -231,9 +231,72 @@ LIGHTER_USE_WEBSOCKET=false
 ❌ WebSocket subscription error: ...
 ```
 
+## 🔧 Ctrl+C ポジション決済機能の修正
+
+### 問題
+- ボットを Ctrl+C で停止した時、オープンポジションが決済されない
+- 原因: `__init__` で既存ポジションファイルを読み込んでいなかった
+- ボット起動時に `self.position_open = False` にリセットされる
+
+### 修正内容
+
+#### 1. `__init__` でポジション状態を復元
+```python
+# Load existing position from file if it exists
+self.current_position = self.load_current_position()
+self.position_open = self.current_position is not None
+
+if self.position_open:
+    print(f"ℹ️  既存のオープンポジションを検知しました:")
+    print(f"   サイズ: {self.current_position.get('size', 'N/A')}")
+```
+
+#### 2. 例外処理の改善
+```python
+except (KeyboardInterrupt, asyncio.CancelledError):
+    # asyncio.sleep() 中の Ctrl+C も検知
+    if self.position_open:
+        print("🔄 Closing open position...")
+        await self.close_delta_neutral_position()
+    raise  # 確実にクリーンアップ
+```
+
+#### 3. 多重ポジション防止
+```python
+async def open_delta_neutral_position(self):
+    if self.position_open:
+        print("⚠️  ポジションは既にオープンしています。")
+        return {'success': False, 'error': 'Position already open'}
+```
+
+#### 4. ループ開始時の既存ポジション処理
+```python
+# If a position already exists at startup, close it first
+if self.position_open:
+    print("\n⚠️  既存のポジションを先に決済します...")
+    await self.close_delta_neutral_position()
+```
+
+### 動作フロー（修正後）
+```
+1. ボット起動
+   → .current_position.json を確認
+   → 既存ポジションがあれば self.position_open = True
+
+2. Ctrl+C で中断
+   → KeyboardInterrupt または CancelledError をキャッチ
+   → self.position_open をチェック
+   → True なら close_delta_neutral_position() を実行
+
+3. 次回起動時
+   → 既存ポジションを検知
+   → ループモード: 先に決済してから新サイクル開始
+```
+
 ## 📦 コミット情報
 
-**コミット**: `1dc561c`
+**最新コミット**: (未コミット)
+**前回コミット**: `1dc561c`
 **ブランチ**: `claude/fix-websocket-execution-011CV1YZxjH7n6UCWgVdGG3J`
 
 ### 変更サマリー:
