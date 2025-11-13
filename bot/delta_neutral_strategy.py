@@ -292,14 +292,18 @@ class DeltaNeutralStrategy:
             print(f"⚠️  Failed to load position from file: {e}")
         return None
 
-    async def get_available_balance(self) -> Dict[str, float]:
+    async def get_available_balance(self, silent: bool = False) -> Dict[str, float]:
         """
         Get available balances from both exchanges
+
+        Args:
+            silent: If True, suppress output (default: False)
 
         Returns:
             Dictionary with balances for each exchange
         """
-        print("\n💰 Checking available balances...")
+        if not silent:
+            print("\n💰 Checking available balances...")
 
         # Get balance from both exchanges
         paradex_balance_info = await self.bot.paradex.get_account_balance()
@@ -344,143 +348,136 @@ class DeltaNeutralStrategy:
             'lighter': lighter_balance
         }
 
-        print(f"   Paradex: ${paradex_balance:.2f}")
-        print(f"   Lighter: ${lighter_balance:.2f}")
+        if not silent:
+            print(f"   Paradex: ${paradex_balance:.2f}")
+            print(f"   Lighter: ${lighter_balance:.2f}")
 
         return balances
 
-    def _save_pending_order(self, order_id: str) -> None:
-        """
-        Save pending order ID to file for cleanup on next run
-
-        Args:
-            order_id: Order ID to save
-        """
-        try:
-            pending_orders_file = ".pending_lighter_orders.json"
-            pending_orders = []
-
-            # Load existing orders
-            if os.path.exists(pending_orders_file):
-                try:
-                    with open(pending_orders_file, 'r') as f:
-                        pending_orders = json.load(f)
-                except Exception:
-                    pending_orders = []
-
-            # Add new order if not already present
-            if order_id not in pending_orders:
-                pending_orders.append(order_id)
-
-            # Save back to file
-            with open(pending_orders_file, 'w') as f:
-                json.dump(pending_orders, f)
-
-        except Exception as e:
-            # Not critical - just log
-            pass
-
-    def _clear_pending_orders_file(self) -> None:
-        """Clear the pending orders file after successful fill"""
-        try:
-            pending_orders_file = ".pending_lighter_orders.json"
-            with open(pending_orders_file, 'w') as f:
-                json.dump([], f)
-        except Exception:
-            pass
-
-    async def _cancel_existing_pending_orders(self) -> None:
-        """
-        Cancel all existing pending orders on Lighter before placing new orders
-
-        This prevents order accumulation from previous runs or failed attempts.
-        Reads order IDs from .pending_orders.json if it exists.
-        """
-        try:
-            print(f"   未約定注文のクリーンアップを試行中...")
-
-            # Try to load pending orders from file
-            pending_orders_file = ".pending_lighter_orders.json"
-            if os.path.exists(pending_orders_file):
-                try:
-                    with open(pending_orders_file, 'r') as f:
-                        pending_orders = json.load(f)
-
-                    if pending_orders and len(pending_orders) > 0:
-                        print(f"   前回の未約定注文を発見: {len(pending_orders)}個")
-
-                        cancelled = 0
-                        for order_id in pending_orders:
-                            try:
-                                success = await self.bot.lighter.cancel_order(str(order_id))
-                                if success:
-                                    cancelled += 1
-                            except Exception:
-                                pass  # Order might already be filled/cancelled
-                            await asyncio.sleep(0.1)  # Rate limiting
-
-                        print(f"   ✓ {cancelled}個の注文をキャンセルしました")
-
-                        # Clear the file
-                        with open(pending_orders_file, 'w') as f:
-                            json.dump([], f)
-                    else:
-                        print(f"   ✓ 前回の未約定注文はありません")
-                except Exception as e:
-                    print(f"   ⚠️  ファイル読み込みエラー: {e}")
-            else:
-                print(f"   ✓ 前回の未約定注文はありません")
-
-        except Exception as e:
-            print(f"   ⚠️  クリーンアップ中にエラー: {e}")
-            # Continue anyway - not critical
 
     async def _cancel_all_pending_orders(self, all_order_ids: list, filled_order_id: str = None) -> None:
         """
-        Cancel all pending orders except the filled one
+        Cancel ALL pending orders using cancel_all_orders() API
+
+        This uses the SDK's cancel_all_orders method to ensure ALL unfilled orders
+        are cancelled. The filled_order_id parameter is ignored since filled orders
+        are automatically excluded (they are no longer pending).
 
         Args:
-            all_order_ids: List of all order IDs that were placed
-            filled_order_id: Order ID that was filled (optional, will not be cancelled)
+            all_order_ids: List of all order IDs that were placed (for logging only)
+            filled_order_id: Order ID that was filled (ignored, kept for compatibility)
         """
-        if not all_order_ids:
-            return
+        print(f"\n🗑️  全未約定注文をキャンセル中（cancel_all_orders使用）...")
 
-        print(f"\n🗑️  未約定注文をキャンセル中... ({len(all_order_ids)}個)")
+        try:
+            success = await self.bot.lighter.cancel_all_orders()
+            if success:
+                print(f"   ✅ 全注文キャンセル完了")
+            else:
+                print(f"   ⚠️  全注文キャンセル失敗")
+        except Exception as e:
+            print(f"   ❌ キャンセルエラー: {e}")
 
-        cancelled_count = 0
-        failed_count = 0
+    async def _poll_for_position_fill(self, target_size: float, timeout: int = 30) -> bool:
+        """
+        Poll for position fill by checking position size via REST API
 
-        for order_id in all_order_ids:
-            # Skip the filled order
-            if filled_order_id and order_id == filled_order_id:
-                continue
+        Args:
+            target_size: Expected position size after fill
+            timeout: Maximum wait time in seconds
 
+        Returns:
+            True if filled (position reached target), False if timeout
+        """
+        polling_interval = 2.0  # 2秒間隔でポーリング（より確実な検知）
+        max_attempts = int(timeout / polling_interval)
+
+        print(f"   📊 ポーリング開始: 目標ポジション {target_size:.2f}")
+        print(f"   ⏱️  間隔: {polling_interval}秒, 最大試行: {max_attempts}回")
+
+        for attempt in range(1, max_attempts + 1):
             try:
-                success = await self.bot.lighter.cancel_order(str(order_id))
-                if success:
-                    cancelled_count += 1
-                    print(f"   ✓ キャンセル成功: {order_id}")
+                # REST APIでアカウント情報を取得
+                account_data = await self.bot.lighter.get_account_balance()
+
+                if account_data and account_data.get('status') not in ['SDK_REQUIRED', 'UNAVAILABLE']:
+                    # ポジション情報を抽出
+                    position = await self.bot.lighter.get_position_from_account(account_data)
+
+                    if position:
+                        current_size = position.get('size', 0)
+
+                        # 進捗表示（毎回表示）
+                        remaining_attempts = max_attempts - attempt
+                        print(f"\r   📈 試行 {attempt}/{max_attempts}: ポジション {current_size:.2f} → 目標 {target_size:.2f} (残り {remaining_attempts}回)", end='', flush=True)
+
+                        # 目標サイズに到達したか確認（0.01の誤差許容）
+                        if abs(current_size - target_size) < 0.01:
+                            print(f"\n   ✅ 約定確認！ポジション: {current_size:.2f} (試行回数: {attempt})")
+                            return True
+                    else:
+                        # ポジションが見つからない場合（初回注文など）
+                        print(f"\r   ⏳ 試行 {attempt}/{max_attempts}: ポジション取得中... (残り {max_attempts - attempt}回)", end='', flush=True)
                 else:
-                    failed_count += 1
-                    print(f"   ⚠️  キャンセル失敗: {order_id}")
+                    # SDK必須または利用不可の場合
+                    if attempt == 1:
+                        print(f"\n   ⚠️  アカウント情報の取得に失敗: {account_data.get('status', 'UNKNOWN')}")
+                        print(f"   単純待機にフォールバック（{timeout}秒）...")
+                        await asyncio.sleep(timeout)
+                        return True  # 楽観的に成功とみなす
+
             except Exception as e:
-                failed_count += 1
-                print(f"   ❌ キャンセルエラー {order_id}: {e}")
+                # エラー表示（毎回）
+                print(f"\r   ⚠️  試行 {attempt}: ポジション確認エラー: {str(e)[:50]}", end='', flush=True)
 
-            # Small delay to avoid rate limiting
-            await asyncio.sleep(0.1)
+            # 次のポーリングまで待機
+            await asyncio.sleep(polling_interval)
 
-        print(f"   完了: 成功 {cancelled_count}, 失敗 {failed_count}")
+        # メインループがタイムアウト → 最終確認を実行
+        print(f"\n\n   ⚠️  メインポーリングがタイムアウト - 最終確認を開始します...")
+        print(f"   💡 API同期遅延の可能性があるため、追加で3回確認します")
+
+        for final_check in range(1, 4):
+            try:
+                # 少し長めに待機してからチェック（API同期を待つ）
+                await asyncio.sleep(2)
+
+                print(f"\n   🔍 最終確認 {final_check}/3...")
+                account_data = await self.bot.lighter.get_account_balance()
+
+                if account_data and account_data.get('status') not in ['SDK_REQUIRED', 'UNAVAILABLE']:
+                    position = await self.bot.lighter.get_position_from_account(account_data)
+
+                    if position:
+                        current_size = position.get('size', 0)
+                        print(f"      現在のポジション: {current_size:.2f}, 目標: {target_size:.2f}")
+
+                        # 約定確認
+                        if abs(current_size - target_size) < 0.01:
+                            print(f"\n   ✅✅ 【最終確認で約定検知！】ポジション: {current_size:.2f}")
+                            print(f"      API同期遅延により初回ポーリングでは検知できませんでした")
+                            return True
+                    else:
+                        print(f"      ポジション情報なし")
+                else:
+                    print(f"      アカウント情報取得失敗: {account_data.get('status', 'UNKNOWN') if account_data else 'None'}")
+
+            except Exception as e:
+                print(f"      ⚠️  エラー: {str(e)[:80]}")
+
+        # 最終確認でも検知できなかった
+        print(f"\n   ❌ タイムアウト: 最終確認({final_check}回)でも約定を確認できませんでした")
+        print(f"      総確認時間: {timeout}秒 + 追加6秒 = {timeout + 6}秒")
+        return False
 
     async def _wait_for_lighter_fill_via_websocket(self, initial_position_size: float, target_size: float, timeout: int = 30) -> bool:
         """
         Wait for order to fill by monitoring position changes via WebSocket
 
-        Note: Falls back to simple timeout if WebSocket is not available.
+        NOTE: WebSocket should be already connected BEFORE calling this method
 
         Args:
-            initial_position_size: Position size before order
+            initial_position_size: Position size before order (not used in WebSocket mode)
             target_size: Expected position size after fill
             timeout: Maximum wait time in seconds
 
@@ -488,66 +485,195 @@ class DeltaNeutralStrategy:
             True if filled, False if timeout
         """
         try:
-            print(f"\n🔌 WebSocketで約定監視を試行中...")
-            print(f"   初期ポジション: {initial_position_size:.2f}")
+            # Verify WebSocket is running
+            if not self.bot.lighter._ws_running:
+                print(f"   ⚠️  WebSocket未接続 - REST APIポーリングにフォールバック")
+                return await self._poll_for_position_fill(target_size, timeout)
+
+            print(f"\n📊 WebSocketで約定監視中...")
             print(f"   目標ポジション: {target_size:.2f}")
             print(f"   タイムアウト: {timeout}秒")
 
             filled_event = asyncio.Event()
 
-            async def on_account_update(account_data: dict):
-                """Callback for account updates"""
+            async def on_position_fill(account_data: dict = None, *args, **kwargs):
+                """Callback for account updates from WebSocket
+
+                Accepts variable arguments for SDK compatibility
+                """
                 try:
+                    # Handle different argument patterns
+                    if account_data is None and len(args) > 0:
+                        account_data = args[0]
+                    elif account_data is None and 'account_data' in kwargs:
+                        account_data = kwargs['account_data']
+
+                    if not account_data:
+                        return
+
                     position = await self.bot.lighter.get_position_from_account(account_data)
                     if position:
                         current_size = position.get('size', 0)
-                        print(f"\r   📊 現在のポジション: {current_size:.2f} (目標: {target_size:.2f})", end='', flush=True)
+                        print(f"\r   📊 [WebSocket] ポジション: {current_size:.2f} → 目標: {target_size:.2f}", end='', flush=True)
 
                         # Check if target reached
                         if abs(current_size - target_size) < 0.01:  # Allow small tolerance
-                            print(f"\n   ✅ 約定確認！ポジション: {current_size:.2f}")
+                            print(f"\n   ✅ [WebSocket] 約定確認！ポジション: {current_size:.2f}")
                             filled_event.set()
                 except Exception as e:
-                    print(f"\n   ❌ アカウント更新処理エラー: {e}")
+                    print(f"\n   ⚠️  [WebSocket] アカウント更新処理エラー: {e}")
 
-            # Start WebSocket subscription in background
-            websocket_task = asyncio.create_task(
-                self.bot.lighter.subscribe_to_account_updates(on_account_update)
-            )
+            # Register callback to existing WebSocket connection
+            self.bot.lighter.add_position_update_callback(on_position_fill)
 
             try:
                 # Wait for fill or timeout
                 await asyncio.wait_for(filled_event.wait(), timeout=timeout)
-                print(f"\n   ✓ WebSocketで約定を検知しました！")
+                print(f"\n   ✅ WebSocketで約定を検知しました！")
                 return True
 
             except asyncio.TimeoutError:
-                print(f"\n   ⏰ タイムアウト: {timeout}秒以内に約定を確認できませんでした")
-                return False
+                print(f"\n   ⏰ [WebSocket] タイムアウト - 最終確認を実行中...")
+
+                # Final verification with polling
+                final_result = await self._poll_for_position_fill(target_size, timeout=6)
+                if final_result:
+                    print(f"   ✅ 最終確認で約定を検知！")
+                    return True
+                else:
+                    print(f"   ❌ タイムアウト: {timeout}秒以内に約定を確認できませんでした")
+                    return False
 
             finally:
-                # Cancel WebSocket task
-                websocket_task.cancel()
-                try:
-                    await websocket_task
-                except asyncio.CancelledError:
-                    pass
-
-        except AttributeError:
-            # WebSocket method not available - fallback to polling
-            print(f"\n   ⚠️  WebSocket機能が利用できません（SDK未サポート）")
-            print(f"   ポーリング方式で{timeout}秒待機します...")
-            await asyncio.sleep(timeout)
-            # Assume filled after waiting (optimistic approach for limit orders)
-            return True
+                # Remove callback after monitoring completes
+                self.bot.lighter.remove_position_update_callback(on_position_fill)
 
         except Exception as e:
+            # Unexpected error - fallback to polling
             print(f"\n   ❌ WebSocket監視エラー: {e}")
-            print(f"   ポーリング方式で{timeout}秒待機します...")
-            await asyncio.sleep(timeout)
-            return True
+            print(f"   エラータイプ: {type(e).__name__}")
+            print(f"   REST API ポーリング方式にフォールバック...")
+            return await self._poll_for_position_fill(target_size, timeout)
 
-    async def _place_lighter_limit_with_price_update(self, side: str, size: float, max_attempts: int = 12, wait_seconds: int = 5, use_websocket: bool = True, reduce_only: bool = False) -> Optional[Dict[str, Any]]:
+    async def _check_position_closed(self, initial_position_size: float, expected_reduction: float, timeout: int = 30, side: str = 'SELL') -> bool:
+        """
+        Check if CLOSE order (reduce_only) has filled by verifying position is gone/reduced
+
+        LOGIC FOR CLOSE ORDERS:
+        - Position still exists = Order NOT filled → Return False
+        - Position gone/reduced = Order filled → Return True
+
+        This is the OPPOSITE of open orders!
+
+        Args:
+            initial_position_size: Position size before close order
+            expected_reduction: Size of the position to close
+            timeout: Maximum wait time in seconds
+            side: Order side ('BUY' closes short, 'SELL' closes long)
+
+        Returns:
+            True if position closed (order filled), False if position still exists (unfilled)
+        """
+        polling_interval = 2.0  # 2秒間隔でポーリング
+        max_attempts = int(timeout / polling_interval)
+
+        print(f"   📊 決済確認ポーリング開始")
+        print(f"   初期ポジション: {initial_position_size:.2f}")
+        print(f"   決済サイズ: {expected_reduction:.2f}")
+        print(f"   期待値: ポジションが消失または {abs(initial_position_size) - expected_reduction:.2f} に減少")
+        print(f"   ⏱️  間隔: {polling_interval}秒, 最大試行: {max_attempts}回")
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # REST APIでアカウント情報を取得
+                account_data = await self.bot.lighter.get_account_balance()
+
+                if account_data and account_data.get('status') not in ['SDK_REQUIRED', 'UNAVAILABLE']:
+                    # ポジション情報を抽出
+                    position = await self.bot.lighter.get_position_from_account(account_data)
+
+                    if position:
+                        current_size = position.get('size', 0)
+                        remaining_attempts = max_attempts - attempt
+
+                        print(f"\r   📈 試行 {attempt}/{max_attempts}: ポジション {current_size:.2f} (初期: {initial_position_size:.2f}) 残り {remaining_attempts}回", end='', flush=True)
+
+                        # CRITICAL: For close orders, check if position is REDUCED or GONE
+                        # Allow 10% tolerance
+                        tolerance = expected_reduction * 0.1
+                        actual_reduction = abs(initial_position_size) - abs(current_size)
+
+                        if actual_reduction >= (expected_reduction - tolerance):
+                            print(f"\n   ✅ 約定確認！ポジションが減少しました")
+                            print(f"      初期: {initial_position_size:.2f} → 現在: {current_size:.2f}")
+                            print(f"      減少量: {actual_reduction:.2f} (期待: {expected_reduction:.2f})")
+                            return True
+                        elif abs(current_size) < 0.01:
+                            # Position is essentially zero (fully closed)
+                            print(f"\n   ✅ 約定確認！ポジションが完全にクローズされました")
+                            print(f"      初期: {initial_position_size:.2f} → 現在: {current_size:.2f}")
+                            return True
+                    else:
+                        # No position found = fully closed
+                        print(f"\n   ✅ 約定確認！ポジションが見つかりません（完全クローズ）")
+                        return True
+                else:
+                    # SDK必須または利用不可の場合
+                    if attempt == 1:
+                        print(f"\n   ⚠️  アカウント情報の取得に失敗: {account_data.get('status', 'UNKNOWN')}")
+                        print(f"   単純待機にフォールバック（{timeout}秒）...")
+                        await asyncio.sleep(timeout)
+                        return True  # 楽観的に成功とみなす
+
+            except Exception as e:
+                print(f"\r   ⚠️  試行 {attempt}: ポジション確認エラー: {str(e)[:50]}", end='', flush=True)
+
+            # 次のポーリングまで待機
+            await asyncio.sleep(polling_interval)
+
+        # タイムアウト → 最終確認
+        print(f"\n\n   ⚠️  メインポーリングがタイムアウト - 最終確認を開始します...")
+        print(f"   💡 API同期遅延の可能性があるため、追加で3回確認します")
+
+        for final_check in range(1, 4):
+            try:
+                await asyncio.sleep(2)
+                print(f"\n   🔍 最終確認 {final_check}/3...")
+                account_data = await self.bot.lighter.get_account_balance()
+
+                if account_data and account_data.get('status') not in ['SDK_REQUIRED', 'UNAVAILABLE']:
+                    position = await self.bot.lighter.get_position_from_account(account_data)
+
+                    if position:
+                        current_size = position.get('size', 0)
+                        print(f"      現在のポジション: {current_size:.2f}, 初期: {initial_position_size:.2f}")
+
+                        # Check if reduced
+                        tolerance = expected_reduction * 0.1
+                        actual_reduction = abs(initial_position_size) - abs(current_size)
+
+                        if actual_reduction >= (expected_reduction - tolerance) or abs(current_size) < 0.01:
+                            print(f"\n   ✅✅ 【最終確認で約定検知！】")
+                            print(f"      初期: {initial_position_size:.2f} → 現在: {current_size:.2f}")
+                            print(f"      API同期遅延により初回ポーリングでは検知できませんでした")
+                            return True
+                        else:
+                            print(f"      ⚠️  ポジションがまだ残っています（減少: {actual_reduction:.2f} < 期待: {expected_reduction:.2f}）")
+                    else:
+                        print(f"      ✅ ポジション情報なし - 完全クローズされました")
+                        return True
+                else:
+                    print(f"      アカウント情報取得失敗: {account_data.get('status', 'UNKNOWN') if account_data else 'None'}")
+
+            except Exception as e:
+                print(f"      ⚠️  エラー: {str(e)[:80]}")
+
+        # 最終確認でも約定を確認できなかった = ポジションがまだ存在 = 未約定
+        print(f"\n   ❌ タイムアウト: ポジションがまだ存在しています - 未約定と判断")
+        print(f"      総確認時間: {timeout}秒 + 追加6秒 = {timeout + 6}秒")
+        return False
+
+    async def _place_lighter_limit_with_price_update(self, side: str, size: float, max_attempts: int = 12, wait_seconds: int = 15, use_websocket: bool = True, reduce_only: bool = False) -> Optional[Dict[str, Any]]:
         """
         Place Lighter limit order with price updates until filled
 
@@ -602,23 +728,106 @@ class DeltaNeutralStrategy:
         current_order_id = None
         all_order_ids = []  # Track all placed orders for cleanup
 
-        # IMPORTANT: Cancel any pending orders from previous runs before starting
-        print(f"\n🧹 事前クリーンアップ: 既存の未約定注文を確認中...")
-        await self._cancel_existing_pending_orders()
+        # CRITICAL: Start WebSocket BEFORE placing any orders
+        if use_websocket:
+            print(f"\n🔌 【重要】注文前にWebSocket接続を確立中...")
+            ws_started = await self.bot.lighter.start_websocket()
+            if ws_started:
+                print(f"   ✅ WebSocket接続完了 - 約定をリアルタイム監視できます")
+            else:
+                print(f"   ⚠️  WebSocket接続失敗 - REST APIポーリングにフォールバック")
+                use_websocket = False
 
         for attempt in range(1, max_attempts + 1):
             print(f"\n{'='*60}")
             print(f"🔄 試行 {attempt}/{max_attempts}")
             print(f"{'='*60}")
 
-            # STEP 1: Cancel previous order from this loop (if exists)
-            if current_order_id:
-                print(f"   🗑️  前回の注文をキャンセル中: {current_order_id}")
-                await self.bot.lighter.cancel_order(str(current_order_id))
-                await asyncio.sleep(0.5)  # Wait for cancellation to process
+            # STEP 0: Update current position size (CRITICAL for detecting fills from previous attempts)
+            if attempt > 1:
+                try:
+                    account_data = await self.bot.lighter.get_account_balance()
+                    if account_data:
+                        position = await self.bot.lighter.get_position_from_account(account_data)
+                        if position:
+                            current_pos_size = position.get('size', 0)
+                            print(f"   📊 現在のポジション: {current_pos_size:.2f}")
+
+                            # Check if target already reached (previous order filled)
+                            expected_position = initial_position_size + (-size if side == 'SELL' else size)
+                            if abs(current_pos_size - expected_position) < size * 0.15:  # 15% tolerance
+                                print(f"   ✅ 前回の注文が約定していました！")
+                                print(f"   初期: {initial_position_size:.2f} → 現在: {current_pos_size:.2f} (期待: {expected_position:.2f})")
+
+                                # Cancel any pending orders
+                                await self._cancel_all_pending_orders(all_order_ids)
+
+                                return {
+                                    'order_id': all_order_ids[-1] if all_order_ids else 'detected',
+                                    'tx_hash': 'detected',
+                                    'filled_size': size,
+                                    'filled_price': 0,  # Unknown
+                                    'status': 'FILLED'
+                                }
+                            else:
+                                print(f"   ⚠️  ポジション未変化 - 約定していません")
+                                print(f"   初期: {initial_position_size:.2f} → 現在: {current_pos_size:.2f} (期待: {expected_position:.2f})")
+                        else:
+                            print(f"   📊 現在のポジション: なし (0)")
+                except Exception as e:
+                    print(f"   ⚠️  ポジション確認エラー: {e}")
+
+            # STEP 1: CRITICAL - Cancel ALL orders using cancel_all_orders() API
+            # This is MANDATORY to prevent multiple orders from filling simultaneously
+            if all_order_ids or attempt > 1:
+                # Use cancel_all_orders for guaranteed cancellation of ALL pending orders
+                print(f"   🗑️  【CRITICAL】全未約定注文を一括キャンセル中（SDK cancel_all_orders使用）")
+
+                success = await self.bot.lighter.cancel_all_orders()
+
+                if not success:
+                    print(f"   ❌ 全注文キャンセル失敗 - 続行を中止します")
+                    return None
+
+                # CRITICAL: Verify ALL orders are cancelled on-chain
+                print(f"   🔍 【重要】キャンセル確認中... (オンチェーン検証)")
+                max_verify_attempts = 10
+                for verify_attempt in range(1, max_verify_attempts + 1):
+                    try:
+                        open_orders = await self.bot.lighter.get_open_orders()
+
+                        if not open_orders:
+                            print(f"   ✅ キャンセル確認完了 - すべての注文が確実にキャンセルされました")
+                            break
+
+                        if verify_attempt < max_verify_attempts:
+                            print(f"   ⏳ 試行 {verify_attempt}/{max_verify_attempts}: まだ {len(open_orders)}個の注文が残っています... 1秒後に再確認")
+                            await asyncio.sleep(1.0)
+                        else:
+                            print(f"   ❌ エラー: {len(open_orders)}個の注文が残っています - 続行を中止します")
+                            print(f"   残存注文ID: {open_orders}")
+                            return None  # ABORT - Do not place new order if old orders still exist
+                    except Exception as e:
+                        print(f"   ⚠️  確認エラー (試行{verify_attempt}): {e}")
+                        if verify_attempt < max_verify_attempts:
+                            await asyncio.sleep(1.0)
+
+                all_order_ids.clear()  # Clear the list after cancellation
+                current_order_id = None
+                await asyncio.sleep(1.0)  # Wait 1 second before placing new order
 
             # STEP 2: Get latest bid/ask
-            bid_ask = await self.bot.lighter.get_bid_ask()
+            print(f"   📊 最新価格を取得中...")
+            try:
+                bid_ask = await asyncio.wait_for(
+                    self.bot.lighter.get_bid_ask(),
+                    timeout=30.0  # 30 second timeout for price fetch
+                )
+            except asyncio.TimeoutError:
+                print(f"   ❌ 価格取得タイムアウト (30秒) - {wait_seconds}秒後に再試行...")
+                await asyncio.sleep(wait_seconds)
+                continue
+
             if not bid_ask:
                 print("❌ 価格取得失敗")
                 await asyncio.sleep(wait_seconds)
@@ -637,8 +846,47 @@ class DeltaNeutralStrategy:
             print(f"   最新価格: Bid ${best_bid:.4f} | Ask ${best_ask:.4f}")
             print(f"   指値価格: ${limit_price:.4f} ({price_label})")
 
-            # STEP 3: Place new limit order
-            order_result = await self.bot.lighter.place_limit_order(side, size, limit_price, reduce_only=reduce_only)
+            # STEP 3: Pre-order safety check - verify NO open orders exist
+            print(f"   🔒 【安全確認】注文前の最終チェック...")
+            try:
+                final_check_orders = await self.bot.lighter.get_open_orders()
+                if final_check_orders:
+                    print(f"   ⚠️  警告: {len(final_check_orders)}個の未約定注文が検出されました")
+                    print(f"   注文ID: {final_check_orders}")
+                    print(f"   🗑️  これらの注文を一括キャンセルします（cancel_all_orders使用）...")
+
+                    # Use cancel_all_orders for guaranteed cancellation
+                    success = await self.bot.lighter.cancel_all_orders()
+                    if not success:
+                        print(f"   ❌ 全注文キャンセル失敗 - この試行をスキップします")
+                        await asyncio.sleep(wait_seconds)
+                        continue
+
+                    # Wait and re-verify
+                    await asyncio.sleep(2.0)
+                    recheck_orders = await self.bot.lighter.get_open_orders()
+                    if recheck_orders:
+                        print(f"   ❌ エラー: まだ {len(recheck_orders)}個の注文が残っています - この試行をスキップします")
+                        await asyncio.sleep(wait_seconds)
+                        continue
+                    else:
+                        print(f"   ✅ 全注文キャンセル確認完了")
+                else:
+                    print(f"   ✅ 安全確認完了 - 未約定注文なし")
+            except Exception as e:
+                print(f"   ⚠️  安全確認エラー: {e} - 続行します")
+
+            # STEP 4: Place new limit order
+            print(f"   📝 注文を送信中...")
+            try:
+                order_result = await asyncio.wait_for(
+                    self.bot.lighter.place_limit_order(side, size, limit_price, reduce_only=reduce_only),
+                    timeout=30.0  # 30 second timeout for order placement
+                )
+            except asyncio.TimeoutError:
+                print(f"   ❌ 注文送信タイムアウト (30秒) - {wait_seconds}秒後に再試行...")
+                await asyncio.sleep(wait_seconds)
+                continue
 
             if not order_result:
                 print("❌ 注文失敗")
@@ -649,60 +897,80 @@ class DeltaNeutralStrategy:
             tx_hash = order_result.get('tx_hash')
             all_order_ids.append(current_order_id)  # Track this order
 
-            # Save order ID to file for cleanup on next run
-            self._save_pending_order(current_order_id)
-
             print(f"   ✓ 注文送信完了")
             print(f"   Order ID: {current_order_id}")
             print(f"   TX Hash: {tx_hash}")
 
-            # Check if filled using WebSocket or polling
-            if use_websocket:
-                # Use WebSocket to detect fill
-                # For SELL orders, position size becomes negative (subtract)
-                # For BUY orders, position size becomes positive (add)
-                if side == 'SELL':
-                    target_position_size = initial_position_size - size
-                else:  # BUY
-                    target_position_size = initial_position_size + size
+            # CRITICAL: Different fill detection logic for OPEN vs CLOSE orders
+            if reduce_only:
+                # CLOSE ORDER: Check if position is gone (filled) or still exists (unfilled)
+                print(f"   🔍 決済注文の約定確認中...")
+                print(f"   ℹ️  ロジック: ポジション消失 = 約定 | ポジション存在 = 未約定")
 
-                filled = await self._wait_for_lighter_fill_via_websocket(
-                    initial_position_size,
-                    target_position_size,
-                    timeout=wait_seconds
+                filled = await self._check_position_closed(
+                    initial_position_size=initial_position_size,
+                    expected_reduction=size,
+                    timeout=wait_seconds,
+                    side=side
                 )
 
                 if filled:
-                    print(f"   ✅ 注文約定完了！")
+                    print(f"   ✅ 決済注文約定完了！ポジションがクローズされました")
                     # Cancel all other pending orders
                     await self._cancel_all_pending_orders(all_order_ids, current_order_id)
-                    # Clear pending orders file
-                    self._clear_pending_orders_file()
                     return {
                         **order_result,
                         'filled_size': size,
                         'filled_price': limit_price,
                         'status': 'FILLED'
                     }
+                else:
+                    print(f"   ⚠️  ポジションがまだ存在 = 未約定")
             else:
-                # Fallback: Wait and assume filled if tx succeeded
-                print(f"   ⏳ {wait_seconds}秒待機中...")
-                await asyncio.sleep(wait_seconds)
+                # OPEN ORDER: Check if position increased (filled)
+                if use_websocket:
+                    # Use WebSocket to detect fill
+                    # For SELL orders, position size becomes negative (subtract)
+                    # For BUY orders, position size becomes positive (add)
+                    if side == 'SELL':
+                        target_position_size = initial_position_size - size
+                    else:  # BUY
+                        target_position_size = initial_position_size + size
 
-                if tx_hash:
-                    print(f"   ✅ 注文約定完了！")
-                    # Cancel all other pending orders
-                    await self._cancel_all_pending_orders(all_order_ids, current_order_id)
-                    # Clear pending orders file
-                    self._clear_pending_orders_file()
-                    return {
-                        **order_result,
-                        'filled_size': size,
-                        'filled_price': limit_price,
-                        'status': 'FILLED'
-                    }
+                    filled = await self._wait_for_lighter_fill_via_websocket(
+                        initial_position_size,
+                        target_position_size,
+                        timeout=wait_seconds
+                    )
 
-            print(f"   ⚠️  約定未確認 - 価格を更新して再試行...")
+                    if filled:
+                        print(f"   ✅ 新規注文約定完了！")
+                        # Cancel all other pending orders
+                        await self._cancel_all_pending_orders(all_order_ids, current_order_id)
+                        return {
+                            **order_result,
+                            'filled_size': size,
+                            'filled_price': limit_price,
+                            'status': 'FILLED'
+                        }
+                else:
+                    # Fallback: Wait and assume filled if tx succeeded
+                    print(f"   ⏳ {wait_seconds}秒待機中...")
+                    await asyncio.sleep(wait_seconds)
+
+                    if tx_hash:
+                        print(f"   ✅ 新規注文約定完了！")
+                        # Cancel all other pending orders
+                        await self._cancel_all_pending_orders(all_order_ids, current_order_id)
+                        return {
+                            **order_result,
+                            'filled_size': size,
+                            'filled_price': limit_price,
+                            'status': 'FILLED'
+                        }
+
+            # 約定未確認 - current_order_idを保持して次のループで確実にキャンセル
+            print(f"   ⚠️  約定未確認 - 次のループで前の注文をキャンセルして再試行...")
 
         # Max attempts reached
         print(f"\n❌ 最大試行回数到達 - Lighter注文失敗")
@@ -987,7 +1255,7 @@ class DeltaNeutralStrategy:
             side=lighter_side,
             size=position_size,
             max_attempts=12,
-            wait_seconds=5,
+            wait_seconds=15,  # CRITICAL: 約定確認のタイムアウト時間（API同期遅延を考慮して15秒、複数注文約定を防止）
             use_websocket=self.bot.config.lighter_use_websocket
         )
 
@@ -1255,6 +1523,53 @@ class DeltaNeutralStrategy:
 
         position_size = self.current_position['size']
 
+        # CRITICAL: Verify actual positions exist before attempting to close
+        print(f"\n🔍 実際のポジション状態を確認中...")
+
+        # Check Lighter position with timeout
+        print(f"   📡 Lighterアカウント情報を取得中...")
+        try:
+            lighter_account = await asyncio.wait_for(
+                self.bot.lighter.get_account_balance(timeout=30.0),
+                timeout=35.0  # Slightly longer than get_account_balance's internal timeout
+            )
+            print(f"   ✓ Lighterアカウント情報取得完了")
+        except asyncio.TimeoutError:
+            print(f"   ❌ Lighterアカウント情報取得タイムアウト (35秒)")
+            return {
+                'success': False,
+                'error': 'Lighter account balance timeout',
+                'action': 'Failed to verify position - API timeout'
+            }
+
+        lighter_position = await self.bot.lighter.get_position_from_account(lighter_account) if lighter_account else None
+
+        if not lighter_position:
+            print(f"⚠️  警告: Lighterに実際のポジションが存在しません！")
+            print(f"   ファイルに保存されているポジション: {position_size}")
+            print(f"   実際のLighterポジション: 0")
+            print(f"   → ポジション情報をクリアして、新規オープンから開始します")
+
+            # Clear stale position data
+            self.position_open = False
+            self.current_position = None
+            self._save_position_to_file()
+
+            return {
+                'success': False,
+                'error': 'No actual position found on Lighter',
+                'action': 'Position data cleared - ready for new position'
+            }
+
+        actual_lighter_size = lighter_position.get('size', 0)
+        print(f"   ✓ Lighterポジション確認: {actual_lighter_size:.2f}")
+
+        # Use actual size instead of saved size if they differ
+        if abs(actual_lighter_size - position_size) > 1:
+            print(f"   ⚠️  保存されたサイズ({position_size})と実際のサイズ({actual_lighter_size:.2f})が異なります")
+            print(f"   → 実際のサイズを使用します: {actual_lighter_size:.2f}")
+            position_size = abs(actual_lighter_size)
+
         # Get the sides that were used when opening the position
         # To close, we use the opposite side
         opened_paradex_side = self.current_position.get('paradex_side', 'BUY')
@@ -1309,13 +1624,30 @@ class DeltaNeutralStrategy:
             side=close_lighter_side,
             size=position_size,
             max_attempts=12,
-            wait_seconds=5,
+            wait_seconds=15,  # CRITICAL: 約定確認のタイムアウト時間（API同期遅延を考慮して15秒）
             use_websocket=self.bot.config.lighter_use_websocket,
             reduce_only=True  # Important: only close existing position
         )
 
         if not lighter_result:
             print(f"\n❌ Lighter注文失敗 - ポジションクローズ失敗")
+            print(f"   ⚠️  実際のポジション状態を確認して状態をクリアします...")
+
+            # Check actual Lighter position to determine if we should clear the flag
+            try:
+                lighter_account = await self.bot.lighter.get_account_balance()
+                lighter_position = await self.bot.lighter.get_position_from_account(lighter_account) if lighter_account else None
+
+                if not lighter_position:
+                    print(f"   ✓ Lighterポジションなし - 状態をクリア")
+                    self.position_open = False
+                    self.current_position = None
+                    self._remove_position_file()
+                else:
+                    print(f"   ⚠️  Lighterポジション残存: {lighter_position.get('size', 0)}")
+            except Exception as e:
+                print(f"   ⚠️  ポジション確認エラー: {e}")
+
             await self.notifier.send_error(
                 "Failed to close Lighter position",
                 f"Lighter {close_lighter_side} order failed after max attempts"
@@ -1329,6 +1661,23 @@ class DeltaNeutralStrategy:
         lighter_status = lighter_result.get('status', '')
         if lighter_status != 'FILLED':
             print(f"\n❌ Lighter注文が約定していません - ステータス: {lighter_status}")
+            print(f"   ⚠️  実際のポジション状態を確認して状態をクリアします...")
+
+            # Check actual Lighter position
+            try:
+                lighter_account = await self.bot.lighter.get_account_balance()
+                lighter_position = await self.bot.lighter.get_position_from_account(lighter_account) if lighter_account else None
+
+                if not lighter_position:
+                    print(f"   ✓ Lighterポジションなし - 状態をクリア")
+                    self.position_open = False
+                    self.current_position = None
+                    self._remove_position_file()
+                else:
+                    print(f"   ⚠️  Lighterポジション残存: {lighter_position.get('size', 0)}")
+            except Exception as e:
+                print(f"   ⚠️  ポジション確認エラー: {e}")
+
             await self.notifier.send_error(
                 "CRITICAL: Lighter order not filled during close",
                 f"Lighter order status: {lighter_status}, cannot proceed to Paradex"
@@ -1355,6 +1704,14 @@ class DeltaNeutralStrategy:
 
         if not paradex_result or isinstance(paradex_result, Exception):
             print(f"\n❌ Paradex注文失敗 - クローズ完了できませんでした")
+            print(f"   ⚠️  Lighterは正常クローズ済み - 状態をクリアします")
+
+            # Lighter is closed, so we should clear the position flag
+            # even though Paradex failed
+            self.position_open = False
+            self.current_position = None
+            self._remove_position_file()
+
             await self.notifier.send_error(
                 "CRITICAL: Failed to close Paradex position",
                 f"Lighter closed successfully but Paradex failed: {paradex_result}"
@@ -1472,6 +1829,64 @@ class DeltaNeutralStrategy:
         # Send loop started notification
         await self.notifier.send_loop_started(self.leverage, self.capital_percentage, max_cycles)
 
+        # CRITICAL: Check for actual positions on exchanges at startup
+        # This prevents infinite retry loops if position_state.json is missing
+        print("\n🔍 起動時チェック: 実際のポジションを確認中...")
+        try:
+            # Check Lighter position
+            print(f"   📡 Lighterポジションチェック中...")
+            lighter_account = await asyncio.wait_for(
+                self.bot.lighter.get_account_balance(timeout=30.0),
+                timeout=35.0
+            )
+            lighter_position = await self.bot.lighter.get_position_from_account(lighter_account) if lighter_account else None
+
+            if lighter_position:
+                lighter_size = lighter_position.get('size', 0)
+                if abs(lighter_size) > 0.1:
+                    print(f"   ⚠️  検出: Lighterポジション {lighter_size:.2f}")
+
+                    # If position_open is False but actual position exists, restore state
+                    if not self.position_open:
+                        print(f"   🔧 ポジション状態を復元中...")
+                        self.position_open = True
+                        self.current_position = {
+                            'size': abs(lighter_size),
+                            'paradex_side': 'BUY',  # Assume standard strategy
+                            'lighter_side': 'SELL',
+                            'open_time': datetime.now().isoformat()
+                        }
+                        self._save_position_to_file()
+                        print(f"   ✅ ポジション状態を復元しました")
+
+            # Check Paradex position
+            print(f"   📡 Paradexポジションチェック中...")
+            paradex_account = await self.bot.paradex.get_account_balance()
+            if paradex_account and hasattr(paradex_account, 'positions') and paradex_account.positions:
+                for pos in paradex_account.positions:
+                    if pos.market == self.bot.config.paradex_market:
+                        paradex_size = float(pos.size)
+                        if abs(paradex_size) > 0.1:
+                            print(f"   ⚠️  検出: Paradexポジション {paradex_size:.2f}")
+
+                            # If position_open is False but actual position exists, restore state
+                            if not self.position_open:
+                                print(f"   🔧 ポジション状態を復元中...")
+                                self.position_open = True
+                                self.current_position = {
+                                    'size': abs(paradex_size),
+                                    'paradex_side': 'BUY' if paradex_size > 0 else 'SELL',
+                                    'lighter_side': 'SELL' if paradex_size > 0 else 'BUY',
+                                    'open_time': datetime.now().isoformat()
+                                }
+                                self._save_position_to_file()
+                                print(f"   ✅ ポジション状態を復元しました")
+                        break
+        except Exception as e:
+            print(f"   ⚠️  起動時チェックエラー: {e}")
+
+        print(f"   現在の状態: position_open={self.position_open}")
+
         # If a position already exists at startup, close it first
         if self.position_open:
             print("\n⚠️  既存のポジションを先に決済します...")
@@ -1487,6 +1902,16 @@ class DeltaNeutralStrategy:
                 print(f"\n{'='*60}")
                 print(f"📍 Cycle {cycle}")
                 print(f"{'='*60}")
+
+                # Check balances and send alert if low (silent to reduce output)
+                try:
+                    balances = await self.get_available_balance(silent=True)
+                    await self.notifier.check_and_alert_low_balance(
+                        balances['lighter'],
+                        balances['paradex']
+                    )
+                except Exception as e:
+                    print(f"⚠️  残高チェックエラー: {e}")
 
                 # Open position
                 open_result = await self.open_delta_neutral_position()

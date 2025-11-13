@@ -325,6 +325,10 @@ class ParadexClient:
                 )
                 # Submit market order
                 result = self.client.api_client.submit_order(order=order)
+
+                # Debug: Print full response
+                print(f"🔍 [DEBUG] Paradex submit_order response: {result}")
+
             else:
                 # Ensure size is an integer (Paradex requires whole units)
                 size_int = int(size)
@@ -338,12 +342,22 @@ class ParadexClient:
                 }
                 result = await self._make_request("POST", "/orders", order_params, signed=True)
 
+                # Debug: Print full response
+                print(f"🔍 [DEBUG] Paradex REST API response: {result}")
+
             if result:
                 # Use the integer size for display
                 display_size = int(size)
                 print(f"✓ Paradex order placed: {side} {display_size} {self.market}")
-                print(f"  Order ID: {result.get('id', 'N/A')}")
+                print(f"  Order ID: {result.get('id', 'N/A') if isinstance(result, dict) else getattr(result, 'id', 'N/A')}")
                 print(f"  Price: {limit_price:.2f}")
+
+                # Check order status if available
+                if isinstance(result, dict):
+                    status = result.get('status', 'UNKNOWN')
+                    print(f"  Status: {status}")
+                elif hasattr(result, 'status'):
+                    print(f"  Status: {result.status}")
 
             return result
 

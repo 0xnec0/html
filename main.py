@@ -10,7 +10,7 @@ import sys
 from bot.config import Config
 from bot.trading_bot import TradingBot
 from bot.auto_trader import AutoTrader
-from bot.delta_neutral_strategy import DeltaNeutralStrategy
+from bot.delta_neutral_strategy_simple import SimpleDeltaNeutralStrategy
 
 
 async def main():
@@ -158,72 +158,37 @@ async def main():
             min_hours = args.min_hours if args.min_hours != 2.0 else config.delta_neutral_min_hours
             max_hours = args.max_hours if args.max_hours != 3.0 else config.delta_neutral_max_hours
 
-            strategy = DeltaNeutralStrategy(
-                bot=bot,
-                leverage=leverage,
-                capital_percentage=capital_pct,
-                usd_amount=usd_amount
-            )
+            strategy = SimpleDeltaNeutralStrategy(bot=bot)
 
-            if args.once:
-                # Run once: open -> wait -> close
-                import random
-                from datetime import datetime, timedelta
-
-                try:
-                    # Open position
-                    open_result = await strategy.open_delta_neutral_position()
-
-                    if not open_result['success']:
-                        print("❌ Failed to open position")
-                        sys.exit(1)
-
-                    # Calculate hold time
-                    hold_seconds = random.uniform(min_hours * 3600, max_hours * 3600)
-                    hold_minutes = hold_seconds / 60
-                    close_time = datetime.now() + timedelta(seconds=hold_seconds)
-
-                    print(f"\n⏰ Position will close at: {close_time.strftime('%Y-%m-%d %H:%M:%S')}")
-                    print(f"   (holding for {hold_minutes:.1f} minutes)")
-
-                    # Wait
-                    await asyncio.sleep(hold_seconds)
-
-                    # Close position
-                    close_result = await strategy.close_delta_neutral_position()
-
-                    if not close_result['success']:
-                        print("❌ Failed to close position")
-                        sys.exit(1)
-
-                except (KeyboardInterrupt, asyncio.CancelledError):
-                    print("\n\n⚠️  Interrupted by user")
-                    if strategy.position_open:
-                        print("🔄 Closing open position...")
-                        await strategy.close_delta_neutral_position()
-                    raise KeyboardInterrupt
-            else:
-                # Run in loop mode (default)
-                await strategy.run_loop(
-                    hold_time_hours=(min_hours, max_hours),
-                    max_cycles=args.max_cycles
-                )
+            # シンプル版は常にループモード（--onceオプション不要）
+            await strategy.run_loop(hold_time_hours=(min_hours, max_hours))
 
         elif args.command == 'close-all':
-            # Try to auto-detect position size if not specified
+            # Auto-detect position size from Lighter API
             position_size = args.size
 
             if not position_size:
-                # Try to load from saved position file
-                saved_position = DeltaNeutralStrategy.load_current_position()
-                if saved_position and 'size' in saved_position:
-                    position_size = saved_position['size']
-                    print(f"ℹ️  Auto-detected position size from saved data: {position_size}")
-                else:
-                    print("❌ No position size specified and no saved position found")
-                    print("   Either:")
-                    print("   1. Specify size manually: python main.py close-all --size 156")
-                    print("   2. Or make sure delta-neutral strategy has saved position data")
+                print("ℹ️  Auto-detecting position size from Lighter API...")
+                try:
+                    account = await bot.lighter.get_account_balance()
+                    if account:
+                        position = await bot.lighter.get_position_from_account(account)
+                        if position:
+                            position_size = abs(position.get('size', 0))
+                            if position_size > 0.1:
+                                print(f"✅ Auto-detected position size: {position_size}")
+                            else:
+                                print("❌ No position found on Lighter")
+                                sys.exit(1)
+                        else:
+                            print("❌ No position found on Lighter")
+                            sys.exit(1)
+                    else:
+                        print("❌ Failed to get account balance")
+                        sys.exit(1)
+                except Exception as e:
+                    print(f"❌ Failed to auto-detect position: {e}")
+                    print("   Please specify size manually: python main.py close-all --size 156")
                     sys.exit(1)
 
             print("\n" + "="*60)
