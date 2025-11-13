@@ -299,9 +299,9 @@ class LighterClient:
             try:
                 if session and not session.closed:
                     await session.close()
-                    # Wait a bit for the connector to finish closing
+                    # Wait for the connector to finish closing completely
                     # This prevents "Unclosed client session" warnings
-                    await asyncio.sleep(0.25)
+                    await asyncio.sleep(0.5)
             except Exception:
                 pass  # Ignore close errors
 
