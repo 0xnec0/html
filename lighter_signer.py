@@ -162,16 +162,22 @@ class LighterSigner:
             (署名済みトランザクションJSON, エラーメッセージ)
         """
         if order_expiry is None:
-            # order_expiryは絶対時刻（Unixタイムスタンプ）
-            # 現在時刻 + 1時間（3600秒）
-            # 注: -1はnonce用の特別値で、expiryでは無効
-            order_expiry = int(time.time()) + 3600
+            # time_in_forceに応じたorder_expiry設定
+            # GOOD_TILL_TIME (Limit Order): -1 = バイナリ側で自動28日設定
+            # IMMEDIATE_OR_CANCEL (Market): 0
+            # デフォルトはLimit Order用
+            order_expiry = -1
 
         # デバッグ: 実際の値を確認
         current_time = int(time.time())
         print(f"[DEBUG] 現在時刻: {current_time}")
         print(f"[DEBUG] order_expiry: {order_expiry}")
-        print(f"[DEBUG] 差分: {order_expiry - current_time}秒")
+        if order_expiry == -1:
+            print(f"[DEBUG] 有効期限: 自動28日設定")
+        elif order_expiry == 0:
+            print(f"[DEBUG] 有効期限: IOC（即時実行またはキャンセル）")
+        else:
+            print(f"[DEBUG] 差分: {order_expiry - current_time}秒")
 
         try:
             result = self.signer.SignCreateOrder(
