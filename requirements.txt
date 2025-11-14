@@ -1,0 +1,17 @@
+# Paradex & Lighter Trading Bot - Requirements
+# 最新版のSDKを使用
+
+# Paradex SDK（最新版）
+paradex_py>=0.4.6
+
+# Lighter SDK（公式・最新版）
+git+https://github.com/elliottech/lighter-python.git@main
+
+# 環境変数管理
+python-dotenv>=1.0.1
+
+# 非同期WebSocket（Lighter用）
+websockets>=12.0
+
+# 追加ユーティリティ
+aiohttp>=3.9.0
