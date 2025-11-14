@@ -34,6 +34,12 @@ async def test_lighter_websocket():
         if not private_key:
             raise ValueError("LIGHTER_PRIVATE_KEYが設定されていません")
 
+        # "0x"プレフィックスを削除
+        if private_key.startswith('0x') or private_key.startswith('0X'):
+            private_key = private_key[2:]
+
+        print(f"   🔍 秘密鍵長: {len(private_key)}文字（期待値: 64文字）")
+
         # アカウント作成
         account = Account.from_key(private_key)
         print(f"   ✅ アカウント準備完了")
