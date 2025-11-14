@@ -76,9 +76,9 @@ class LighterSigner:
         self.signer.CreateClient.restype = ctypes.c_char_p  # エラー文字列またはNone
 
         # クライアント作成（秘密鍵で初期化）
-        # Lighter mainnet: chain_id = 1
+        # Lighter mainnet: chain_id = 304（lighter-python標準）
         base_url = "https://mainnet.zklighter.elliot.ai"
-        chain_id = 1  # mainnet
+        chain_id = 304  # mainnet
 
         err = self.signer.CreateClient(
             base_url.encode('utf-8'),
