@@ -27,22 +27,31 @@ def test_paradex_connection():
         )
         print("   ✅ SDK初期化成功\n")
 
-        # 2. アカウント情報取得
-        print("2️⃣ アカウント情報取得中...")
-        account = paradex.account.get_account()
-        print(f"   ✅ アカウント取得成功")
-        print(f"   Account ID: {account.get('id', 'N/A')}")
-        print(f"   L2 Address: {account.get('l2_address', 'N/A')[:10]}...\n")
+        # 2. アカウント情報表示
+        print("2️⃣ アカウント情報表示...")
+        # paradex.accountは直接プロパティとしてアクセス
+        print(f"   ✅ アカウント情報:")
+        print(f"   L2 Address: {hex(paradex.account.l2_address)}")
+        print(f"   L2 Public Key: {hex(paradex.account.l2_public_key)[:20]}...\n")
 
         # 3. 市場一覧取得
         print("3️⃣ 市場一覧取得中...")
-        markets = paradex.markets.list_markets()
+        markets = paradex.api_client.fetch_markets()
         print(f"   ✅ 市場データ取得成功")
-        print(f"   利用可能市場数: {len(markets)}個\n")
+
+        # marketsがリストかdictか確認して処理
+        if isinstance(markets, dict) and 'results' in markets:
+            markets_list = markets['results']
+        elif isinstance(markets, list):
+            markets_list = markets
+        else:
+            markets_list = [markets]
+
+        print(f"   利用可能市場数: {len(markets_list)}個\n")
 
         # 最初の3つの市場を表示
         print("   主要市場:")
-        for i, market in enumerate(markets[:3]):
+        for i, market in enumerate(markets_list[:3]):
             symbol = market.get('symbol', 'N/A')
             mark_price = market.get('mark_price', 'N/A')
             print(f"     {i+1}. {symbol}: ${mark_price}")
