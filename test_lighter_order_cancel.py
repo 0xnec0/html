@@ -50,6 +50,7 @@ async def main():
     base_url = os.getenv('LIGHTER_BASE_URL', 'https://mainnet.zklighter.elliot.ai')
     private_key = os.getenv('LIGHTER_PRIVATE_KEY')
     account_index = int(os.getenv('LIGHTER_ACCOUNT_INDEX', '0'))
+    api_key_index = int(os.getenv('LIGHTER_API_KEY_INDEX', '6'))  # .envから読み込み
 
     if not private_key:
         print("❌ LIGHTER_PRIVATE_KEYが設定されていません")
@@ -58,7 +59,8 @@ async def main():
     print(f"📊 設定:")
     print(f"   市場: {market_symbol}")
     print(f"   目標金額: ${target_usd}")
-    print(f"   アカウントインデックス: {account_index}\n")
+    print(f"   アカウントインデックス: {account_index}")
+    print(f"   APIキーインデックス: {api_key_index}\n")
 
     # 1. 市場情報取得
     print("1️⃣ 市場情報取得中...")
