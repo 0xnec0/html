@@ -145,7 +145,7 @@ async def main():
     # 5. 注文送信
     print("5️⃣ 注文送信中...")
     try:
-        response = await send_transaction(base_url, tx_json)
+        response = await send_transaction(base_url, tx_json, LighterSigner.TX_TYPE_CREATE_ORDER)
         print(f"   ✅ 注文送信成功！")
         print(f"   レスポンス: {response}\n")
     except Exception as e:
@@ -176,7 +176,7 @@ async def main():
     # 8. キャンセル送信
     print("8️⃣ キャンセル送信中...")
     try:
-        cancel_response = await send_transaction(base_url, cancel_tx_json)
+        cancel_response = await send_transaction(base_url, cancel_tx_json, LighterSigner.TX_TYPE_CANCEL_ORDER)
         print(f"   ✅ キャンセル成功！")
         print(f"   レスポンス: {cancel_response}\n")
     except Exception as e:

@@ -25,6 +25,10 @@ class LighterSigner:
     ORDER_TIME_IN_FORCE_GOOD_TILL_TIME = 1       # GTT - 期限まで有効
     ORDER_TIME_IN_FORCE_POST_ONLY = 2            # Post-only (maker注文)
 
+    # トランザクションタイプ定数
+    TX_TYPE_CREATE_ORDER = 14
+    TX_TYPE_CANCEL_ORDER = 15
+
     # デフォルト有効期限
     DEFAULT_28_DAY_ORDER_EXPIRY = 28 * 24 * 60 * 60  # 28日（秒）
     DEFAULT_10_MIN_AUTH_EXPIRY = 10 * 60  # 10分（秒）
@@ -200,6 +204,9 @@ class LighterSigner:
 
             if result.result:
                 tx_json = result.result.decode('utf-8')
+                # デバッグ: 署名されたトランザクションJSONを表示
+                print(f"[DEBUG] 署名されたトランザクションJSON:")
+                print(tx_json)
                 return tx_json, None
 
             return None, "No result returned"
@@ -245,13 +252,14 @@ class LighterSigner:
             return None, str(e)
 
 
-async def send_transaction(base_url: str, tx_json: str) -> dict:
+async def send_transaction(base_url: str, tx_json: str, tx_type: int) -> dict:
     """
     署名済みトランザクションをLighter APIに送信
 
     Args:
         base_url: Lighter API URL
         tx_json: 署名済みトランザクションJSON文字列
+        tx_type: トランザクションタイプ（14=CREATE_ORDER, 15=CANCEL_ORDER）
 
     Returns:
         APIレスポンス
@@ -260,11 +268,13 @@ async def send_transaction(base_url: str, tx_json: str) -> dict:
 
     url = f"{base_url}/api/v1/sendTx"
 
-    # JSON文字列をパース
-    tx_data = json.loads(tx_json)
+    # multipart/form-dataとして送信
+    form_data = aiohttp.FormData()
+    form_data.add_field('tx_type', str(tx_type))
+    form_data.add_field('tx_info', tx_json)
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=tx_data) as response:
+        async with session.post(url, data=form_data) as response:
             if response.status == 200:
                 return await response.json()
             else:
