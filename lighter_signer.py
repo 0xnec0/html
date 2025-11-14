@@ -162,7 +162,9 @@ class LighterSigner:
             (署名済みトランザクションJSON, エラーメッセージ)
         """
         if order_expiry is None:
-            order_expiry = int(time.time()) + self.DEFAULT_28_DAY_ORDER_EXPIRY
+            # order_expiryは相対時間（秒数）を期待
+            # 短めの有効期限（10分）を使用
+            order_expiry = self.DEFAULT_10_MIN_AUTH_EXPIRY
 
         try:
             result = self.signer.SignCreateOrder(
