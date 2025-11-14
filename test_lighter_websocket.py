@@ -65,40 +65,31 @@ async def test_lighter_websocket():
             async with websockets.connect(ws_endpoint, ping_interval=20, ping_timeout=10) as websocket:
                 print("   ✅ WebSocket接続成功\n")
 
-                # 3. 認証メッセージ送信（必要な場合）
-                print("3️⃣ 認証中...")
+                # 3. チャンネル購読（Lighter公式形式）
+                print("3️⃣ チャンネル購読中...")
 
-                # 認証メッセージの署名（Lighter APIの仕様に合わせる）
-                # 注: 実際の認証フォーマットはAPIドキュメント参照
-                auth_message = {
-                    "type": "authenticate",
-                    "account_index": account_index,
-                    "address": account.address,
-                }
-
-                # メッセージを送信
-                await websocket.send(json.dumps(auth_message))
-                print(f"   ✅ 認証メッセージ送信完了\n")
-
-                # 4. チャンネル購読
-                print("4️⃣ チャンネル購読中...")
-
-                # アカウント更新を購読
-                subscribe_message = {
+                # アカウント更新を購読（公式形式: channel単数形）
+                # アカウント全体の更新を購読
+                account_subscribe = {
                     "type": "subscribe",
-                    "channels": [
-                        f"account.{account_index}",  # アカウント更新
-                        "trades",  # 約定イベント
-                        "fills",   # フィルイベント
-                    ]
+                    "channel": f"account_all/{account_index}"
                 }
+                await websocket.send(json.dumps(account_subscribe))
+                print(f"   📡 購読: account_all/{account_index}")
 
-                await websocket.send(json.dumps(subscribe_message))
-                print("   ✅ チャンネル購読完了")
-                print(f"   購読中: account.{account_index}, trades, fills\n")
+                # オーダーブック購読（例: market_id=0のBTC-USD-PERPなど）
+                # 注: 実際の取引で使うmarket_idに変更する
+                orderbook_subscribe = {
+                    "type": "subscribe",
+                    "channel": "order_book/0"
+                }
+                await websocket.send(json.dumps(orderbook_subscribe))
+                print(f"   📡 購読: order_book/0")
 
-                # 5. イベント監視（60秒間）
-                print("5️⃣ イベント監視中（60秒間）...")
+                print("   ✅ チャンネル購読完了\n")
+
+                # 4. イベント監視（60秒間）
+                print("4️⃣ イベント監視中（60秒間）...")
                 print("   💡 この間に注文が約定すればイベントが届きます")
                 print("   💡 Ctrl+C で中断できます\n")
 
@@ -127,37 +118,50 @@ async def test_lighter_websocket():
                             # メッセージ解析
                             try:
                                 data = json.loads(message)
-                                event_count += 1
 
-                                # イベントタイプ別に表示
+                                # イベントタイプ別に表示（Lighter公式形式）
                                 event_type = data.get('type', 'unknown')
 
-                                if event_type == 'account_update':
+                                # pingはカウントしない
+                                if event_type != 'ping':
+                                    event_count += 1
+
+                                if event_type == 'connected':
+                                    print(f"\n✅ 【接続確認】セッションID: {data.get('session_id', 'N/A')}")
+
+                                elif event_type == 'subscribed/account_all':
+                                    print(f"\n✅ 【購読確認】アカウント購読成功")
+
+                                elif event_type == 'subscribed/order_book':
+                                    print(f"\n✅ 【購読確認】オーダーブック購読成功")
+
+                                elif event_type == 'update/account_all':
                                     print(f"\n📨 【イベント {event_count}】アカウント更新受信:")
-                                    print(f"   タイムスタンプ: {data.get('timestamp', 'N/A')}")
+                                    # アカウントデータを表示
+                                    if 'data' in data:
+                                        account_data = data['data']
+                                        print(f"   データ: {str(account_data)[:200]}...")
 
-                                    # ポジション情報があれば表示
-                                    if 'positions' in data:
-                                        positions = data['positions']
-                                        print(f"   ポジション数: {len(positions)}")
-                                        for pos in positions[:3]:
-                                            print(f"     - Market: {pos.get('market_id', 'N/A')}, Size: {pos.get('size', 'N/A')}")
+                                elif event_type == 'update/order_book':
+                                    print(f"\n📊 【イベント {event_count}】オーダーブック更新:")
+                                    if 'data' in data:
+                                        ob_data = data['data']
+                                        asks = ob_data.get('asks', [])
+                                        bids = ob_data.get('bids', [])
+                                        print(f"   Asks: {len(asks)}個, Bids: {len(bids)}個")
 
-                                elif event_type == 'trade' or event_type == 'fill':
-                                    print(f"\n🎯 【約定イベント {event_count}】受信:")
-                                    print(f"   Trade ID: {data.get('trade_id', 'N/A')}")
-                                    print(f"   Market: {data.get('market_id', 'N/A')}")
-                                    print(f"   Side: {data.get('side', 'N/A')}")
-                                    print(f"   Size: {data.get('size', 'N/A')}")
-                                    print(f"   Price: {data.get('price', 'N/A')}")
+                                elif event_type == 'ping':
+                                    # Pingに応答
+                                    await websocket.send(json.dumps({"type": "pong"}))
+                                    # pingは表示しない（多すぎるため）
 
                                 else:
-                                    # その他のイベント
+                                    # その他のイベント（エラーなど）
                                     print(f"\n📩 【イベント {event_count}】{event_type}:")
                                     print(f"   データ: {str(data)[:200]}...")
 
                             except json.JSONDecodeError:
-                                # JSON以外のメッセージ（pingなど）
+                                # JSON以外のメッセージ
                                 pass
 
                         except asyncio.TimeoutError:
