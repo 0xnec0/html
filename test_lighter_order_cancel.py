@@ -13,7 +13,7 @@ import os
 import asyncio
 import time
 from dotenv import load_dotenv
-from lighter_signer import LighterSigner, send_transaction
+from lighter_signer import LighterSigner, send_transaction, get_next_nonce
 import aiohttp
 
 # 環境変数読み込み
@@ -124,6 +124,14 @@ async def main():
     # ユニークな注文ID（タイムスタンプ）
     client_order_index = int(time.time() * 1000)
 
+    # APIから正しいnonceを取得
+    try:
+        nonce = await get_next_nonce(base_url, account_index, api_key_index)
+        print(f"   📊 取得したnonce: {nonce}")
+    except Exception as e:
+        print(f"❌ nonce取得失敗: {e}")
+        return
+
     tx_json, error = signer.sign_create_order(
         market_index=market_id,
         client_order_index=client_order_index,
@@ -132,7 +140,8 @@ async def main():
         is_ask=False,  # False=買い
         order_type=LighterSigner.ORDER_TYPE_LIMIT,
         time_in_force=LighterSigner.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
-        reduce_only=False
+        reduce_only=False,
+        nonce=nonce  # APIから取得したnonceを使用
     )
 
     if error:
@@ -162,9 +171,18 @@ async def main():
     # 7. キャンセル署名
     print("7️⃣ 注文キャンセル中...")
 
+    # キャンセル用のnonceを取得
+    try:
+        cancel_nonce = await get_next_nonce(base_url, account_index, api_key_index)
+        print(f"   📊 取得したnonce: {cancel_nonce}")
+    except Exception as e:
+        print(f"❌ nonce取得失敗: {e}")
+        return
+
     cancel_tx_json, cancel_error = signer.sign_cancel_order(
         market_index=market_id,
-        order_index=client_order_index
+        order_index=client_order_index,
+        nonce=cancel_nonce  # APIから取得したnonceを使用
     )
 
     if cancel_error:

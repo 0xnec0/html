@@ -252,6 +252,36 @@ class LighterSigner:
             return None, str(e)
 
 
+async def get_next_nonce(base_url: str, account_index: int, api_key_index: int) -> int:
+    """
+    Lighter APIから次のnonceを取得
+
+    Args:
+        base_url: Lighter API URL
+        account_index: アカウントインデックス
+        api_key_index: APIキーインデックス
+
+    Returns:
+        次のnonce値
+    """
+    import aiohttp
+
+    url = f"{base_url}/api/v1/nextNonce"
+    params = {
+        'account_index': account_index,
+        'api_key_index': api_key_index
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data['nonce']
+            else:
+                text = await response.text()
+                raise Exception(f"Failed to get nonce - HTTP {response.status}: {text}")
+
+
 async def send_transaction(base_url: str, tx_json: str, tx_type: int) -> dict:
     """
     署名済みトランザクションをLighter APIに送信
