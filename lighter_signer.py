@@ -29,14 +29,14 @@ class LighterSigner:
     DEFAULT_28_DAY_ORDER_EXPIRY = 28 * 24 * 60 * 60  # 28日（秒）
     DEFAULT_10_MIN_AUTH_EXPIRY = 10 * 60  # 10分（秒）
 
-    def __init__(self, private_key: str, account_index: int, api_key_index: int = 255):
+    def __init__(self, private_key: str, account_index: int, api_key_index: int = 2):
         """
         初期化
 
         Args:
             private_key: Lighter秘密鍵（0xなし64文字）
             account_index: アカウントインデックス
-            api_key_index: APIキーインデックス（デフォルト255）
+            api_key_index: APIキーインデックス（デフォルト2、lighter-python準拠）
         """
         # 0xプレフィックス削除
         if private_key.startswith('0x') or private_key.startswith('0X'):

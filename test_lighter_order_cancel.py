@@ -109,7 +109,7 @@ async def main():
         signer = LighterSigner(
             private_key=private_key,
             account_index=account_index,
-            api_key_index=255
+            api_key_index=2  # lighter-pythonのデフォルト（255ではなく2）
         )
         print("   ✅ 署名クライアント初期化成功\n")
     except Exception as e:
