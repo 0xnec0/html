@@ -1,0 +1,852 @@
+"""
+Lighter DEX client implementation using official SDK
+Handles connection and trading operations on Lighter
+"""
+
+import asyncio
+import time
+import json
+from typing import Dict, Any, Optional
+from decimal import Decimal
+
+# Try to import SDK, but make it optional
+try:
+    import lighter
+    LIGHTER_SDK_AVAILABLE = True
+except ImportError:
+    LIGHTER_SDK_AVAILABLE = False
+    print("⚠ Lighter SDK not available, using REST API")
+
+
+class LighterClient:
+    """Client for interacting with Lighter DEX using official SDK"""
+
+    def __init__(self, private_key: str, account_index: int, api_key_index: int = 2, market: str = "DOGE", proxy_url: str = None):
+        """
+        Initialize Lighter client with official SDK
+
+        Args:
+            private_key: API key private key for signing transactions
+            account_index: Account index from Lighter
+            api_key_index: API key index (2-254, default 2)
+            market: Trading market symbol
+            proxy_url: Proxy URL with authentication (optional)
+        """
+        self.private_key = private_key
+        self.account_index = account_index
+        self.api_key_index = api_key_index
+        self.market = market
+        self.base_url = "https://mainnet.zklighter.elliot.ai"
+        self.proxy_url = proxy_url
+
+        # Initialize Lighter SDK
+        self.client = None
+        if LIGHTER_SDK_AVAILABLE:
+            try:
+                self.client = lighter.SignerClient(
+                    url=self.base_url,
+                    private_key=self.private_key,
+                    account_index=self.account_index,
+                    api_key_index=self.api_key_index,
+                )
+
+                # Verify client is working
+                err = self.client.check_client()
+                if err is not None:
+                    print(f"⚠ Lighter client check failed: {err}")
+                    self.client = None
+                else:
+                    print(f"✓ Lighter initialized with official SDK")
+                    print(f"  Account Index: {self.account_index}")
+                    print(f"  API Key Index: {self.api_key_index}")
+            except Exception as e:
+                print(f"⚠ Lighter SDK init failed: {e}")
+                self.client = None
+
+        if not self.client:
+            print(f"⚠ Lighter SDK not available, using REST API fallback")
+
+        print(f"  Market: {self.market}")
+
+        # Cache for market ID and decimal info lookup
+        self._market_id_cache = {}
+        self._market_info_cache = {}  # Store full market details including decimals
+
+        # HTTP session for REST API calls (will be created on first use)
+        self._session = None
+
+    async def _get_session(self):
+        """Get or create aiohttp session"""
+        if self._session is None or self._session.closed:
+            import aiohttp
+            # trust_env=True enables automatic proxy detection from environment variables
+            self._session = aiohttp.ClientSession(trust_env=True)
+        return self._session
+
+    async def _get_market_id_from_api(self, symbol: str) -> Optional[int]:
+        """
+        Get market_id from Lighter API for given symbol
+
+        Args:
+            symbol: Market symbol (e.g., 'JUP', 'DOGE')
+
+        Returns:
+            market_id or None if not found
+        """
+        # Check cache first
+        if symbol in self._market_id_cache:
+            return self._market_id_cache[symbol]
+
+        try:
+            session = await self._get_session()
+            url = f"{self.base_url}/api/v1/orderBookDetails?market={symbol}"
+            async with session.get(url, proxy=self.proxy_url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if isinstance(data, dict) and 'order_book_details' in data:
+                        for book in data['order_book_details']:
+                            if book.get('symbol', '').upper() == symbol.upper():
+                                market_id = book.get('market_id')
+                                if market_id is not None:
+                                    # Cache market_id and full details
+                                    self._market_id_cache[symbol] = market_id
+                                    self._market_info_cache[symbol] = book
+
+                                    # Show decimal info
+                                    price_decimals = book.get('price_decimals', 0)
+                                    size_decimals = book.get('size_decimals', 0)
+                                    print(f"ℹ️  Found market_id for {symbol}: {market_id}")
+                                    print(f"   Price decimals: {price_decimals}, Size decimals: {size_decimals}")
+
+                                    return market_id
+        except Exception as e:
+            print(f"⚠ Failed to fetch market_id for {symbol}: {e}")
+
+        return None
+
+    async def get_market_price(self) -> Optional[float]:
+        """
+        Get current market price
+
+        Returns:
+            Current market price or None if error
+        """
+        try:
+            # Try SDK first if available (currently not working, falls back to REST API)
+            if self.client:
+                try:
+                    response = await self.client.api_client.call_api(
+                        method='GET',
+                        url='/markets'
+                    )
+
+                    if response and hasattr(response, 'data'):
+                        import json
+                        markets = json.loads(response.data) if isinstance(response.data, str) else response.data
+
+                        if isinstance(markets, dict):
+                            if 'markets' in markets:
+                                markets = markets['markets']
+                            elif 'data' in markets:
+                                markets = markets['data']
+
+                        if isinstance(markets, list):
+                            for market in markets:
+                                symbol = market.get('symbol', '') if isinstance(market, dict) else getattr(market, 'symbol', '')
+                                if symbol.upper() == self.market.upper():
+                                    if isinstance(market, dict):
+                                        return float(market.get('last_price', 0) or market.get('mark_price', 0) or 0) or None
+                                    else:
+                                        return float(getattr(market, 'last_price', 0) or getattr(market, 'mark_price', 0) or 0) or None
+
+                except Exception:
+                    # SDK failed, fall back to REST API
+                    pass
+
+            # REST API fallback
+            session = await self._get_session()
+            url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
+
+            try:
+                async with session.get(url, proxy=self.proxy_url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+
+                        # Extract price from orderBookDetails response
+                        if isinstance(data, dict) and 'order_book_details' in data:
+                            # Find DOGE market in order_book_details array
+                            for book in data['order_book_details']:
+                                if book.get('symbol', '').upper() == self.market.upper():
+                                    return float(book.get('last_trade_price', 0) or 0) or None
+
+                        return None
+                    else:
+                        print(f"❌ Lighter API error: Status {response.status}")
+                        return None
+
+            except Exception as e:
+                print(f"❌ Lighter error: {e}")
+                return None
+
+        except Exception as e:
+            print(f"❌ Lighter price fetch error: {e}")
+            return None
+
+    async def get_bid_ask(self) -> Optional[tuple]:
+        """
+        Get current bid and ask prices
+
+        Note: Lighter doesn't provide orderbook via REST API.
+        We use last_trade_price with small estimated spread instead.
+
+        Returns:
+            Tuple of (bid, ask) or None if error
+        """
+        try:
+            import aiohttp
+            session = await self._get_session()
+
+            # Get market info which includes last_trade_price
+            url = f"{self.base_url}/api/v1/orderBookDetails?market={self.market}"
+
+            try:
+                async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+
+                        if isinstance(data, dict) and 'order_book_details' in data:
+                            for book in data['order_book_details']:
+                                symbol = book.get('symbol', '')
+
+                                if symbol.upper() == self.market.upper():
+                                    # Get last trade price
+                                    last_price = book.get('last_trade_price', 0)
+
+                                    if last_price and float(last_price) > 0:
+                                        last_price = float(last_price)
+
+                                        # Estimate tight bid/ask spread (0.1% = 10 basis points)
+                                        # This is reasonable for liquid perpetual futures
+                                        spread_pct = 0.001  # 0.1%
+                                        half_spread = last_price * spread_pct / 2
+
+                                        estimated_bid = last_price - half_spread
+                                        estimated_ask = last_price + half_spread
+
+                                        if not hasattr(self, '_price_estimation_logged'):
+                                            print(f"\nℹ️  Lighter API doesn't provide real-time orderbook via REST")
+                                            print(f"   Using last_trade_price with estimated {spread_pct*100}% spread")
+                                            print(f"   Last price: ${last_price:.4f}")
+                                            print(f"   Estimated bid: ${estimated_bid:.4f}")
+                                            print(f"   Estimated ask: ${estimated_ask:.4f}")
+                                            self._price_estimation_logged = True
+
+                                        return (estimated_bid, estimated_ask)
+                                    else:
+                                        print(f"⚠️  {symbol}: 最終取引価格がありません")
+                                        return None
+
+                            print(f"❌ Market '{self.market}' not found in response")
+                            return None
+                        else:
+                            print(f"❌ Invalid API response structure")
+                            return None
+                    else:
+                        print(f"❌ HTTP {response.status}")
+                        return None
+
+            except asyncio.TimeoutError:
+                print(f"❌ Timeout")
+                return None
+            except aiohttp.ClientError as e:
+                print(f"❌ ClientError: {e}")
+                return None
+
+        except Exception as e:
+            print(f"❌ get_bid_ask error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    async def place_limit_order(self, side: str, size: float, price: float, reduce_only: bool = False) -> Optional[Dict[str, Any]]:
+        """
+        Place a limit order
+
+        Args:
+            side: Order side ('BUY' or 'SELL')
+            size: Order size
+            price: Limit price
+            reduce_only: If True, order will only reduce existing position (for closing positions)
+
+        Returns:
+            Order result with order_id or None if error
+        """
+        try:
+            if not self.client:
+                print("❌ Lighter SDK required for placing orders")
+                return None
+
+            # Create auth token
+            auth, err = self.client.create_auth_token_with_expiry(
+                lighter.SignerClient.DEFAULT_10_MIN_AUTH_EXPIRY
+            )
+            if err is not None:
+                raise Exception(f"Failed to create auth token: {err}")
+
+            # Generate unique client order index (timestamp in milliseconds)
+            client_order_index = int(time.time() * 1000)
+
+            # Get market_id from API
+            market_id = await self._get_market_id_from_api(self.market)
+            if market_id is None:
+                raise ValueError(f"Could not find market_id for {self.market}")
+
+            # Get market info for decimal conversion
+            market_info = self._market_info_cache.get(self.market)
+            if not market_info:
+                raise ValueError(f"Market info not found for {self.market}")
+
+            # Extract decimal precision
+            price_decimals = market_info.get('price_decimals', 0)
+            size_decimals = market_info.get('size_decimals', 0)
+
+            # Convert to integers using decimal precision
+            price_int = int(price * (10 ** price_decimals))
+            base_amount_int = int(size * (10 ** size_decimals))
+
+            # Debug: Print conversion
+            print(f"ℹ️  Order parameters:")
+            print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
+            print(f"   Price: {price} → {price_int} (decimals: {price_decimals})")
+            print(f"   Market ID: {market_id}")
+
+            # Validate minimum order size (Lighter typically requires minimum $10-20 worth)
+            order_value_usd = (base_amount_int / (10 ** size_decimals)) * (price_int / (10 ** price_decimals))
+            print(f"   Order value: ${order_value_usd:.2f}")
+
+            if base_amount_int <= 0:
+                raise ValueError(f"Invalid base_amount: {base_amount_int} (original size: {size})")
+            if price_int <= 0:
+                raise ValueError(f"Invalid price: {price_int} (original price: {price})")
+
+            # Check minimum order value
+            MIN_ORDER_VALUE_USD = 10.0  # Lighter's typical minimum
+            if order_value_usd < MIN_ORDER_VALUE_USD:
+                raise ValueError(
+                    f"Order value ${order_value_usd:.2f} is below minimum ${MIN_ORDER_VALUE_USD:.2f}. "
+                    f"Increase position size or check market configuration."
+                )
+
+            print(f"   Reduce only: {reduce_only}")
+
+            # Place limit order using create_order
+            tx, tx_hash, err = await self.client.create_order(
+                market_index=market_id,
+                client_order_index=client_order_index,
+                base_amount=base_amount_int,  # Integer
+                price=price_int,     # Integer - limit price
+                is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
+                order_type=lighter.SignerClient.ORDER_TYPE_LIMIT,
+                time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
+                reduce_only=reduce_only,
+                trigger_price=0,
+            )
+
+            if err is not None:
+                raise Exception(f"Order failed: {err}")
+
+            result = {
+                'order_id': client_order_index,  # Use client order index as order ID
+                'tx_hash': tx_hash,
+                'tx': tx,
+                'status': 'submitted',
+                'side': side,
+                'size': size,
+                'price': price
+            }
+
+            print(f"✓ Lighter limit order placed: {side} {size} @ ${price:.4f}")
+            print(f"  Order ID: {client_order_index}")
+            print(f"  TX Hash: {tx_hash}")
+
+            return result
+
+        except Exception as e:
+            print(f"❌ Lighter limit order error: {e}")
+            return None
+
+    async def get_order_status(self, order_id: int) -> Optional[str]:
+        """
+        Get order status by order ID
+
+        Args:
+            order_id: Client order index used when placing the order
+
+        Returns:
+            Order status: 'FILLED', 'PENDING', 'CANCELLED', 'FAILED', or None if error
+        """
+        try:
+            if not self.client:
+                print("❌ Lighter SDK required for checking order status")
+                return None
+
+            # Get market_id
+            market_id = await self._get_market_id_from_api(self.market)
+            if market_id is None:
+                return None
+
+            # Query order status from Lighter API
+            # Note: Lighter SDK might not have direct order status query
+            # We may need to use REST API to check order status
+
+            # For now, assume order is filled after a short delay
+            # This is a placeholder - actual implementation depends on Lighter API
+            # TODO: Implement actual order status check via Lighter API/SDK
+
+            print(f"ℹ️  Checking order status for order {order_id}...")
+            return 'PENDING'  # Placeholder
+
+        except Exception as e:
+            print(f"❌ Error checking order status: {e}")
+            return None
+
+    async def place_market_order(self, side: str, size: float, reduce_only: bool = False) -> Optional[Dict[str, Any]]:
+        """
+        Place a market order
+
+        Args:
+            side: Order side ('BUY' or 'SELL')
+            size: Order size
+            reduce_only: If True, order will only reduce existing position (for closing positions)
+
+        Returns:
+            Order result or None if error
+        """
+        try:
+            if not self.client:
+                print("❌ Lighter SDK required for placing orders")
+                return None
+
+            # Get current price for limit order
+            current_price = await self.get_market_price()
+            if not current_price:
+                raise ValueError("Could not fetch current market price")
+
+            # Set aggressive limit price to act as market order
+            slippage_multiplier = 1.05 if side.upper() == 'BUY' else 0.95
+            limit_price = current_price * slippage_multiplier
+
+            # Create auth token
+            auth, err = self.client.create_auth_token_with_expiry(
+                lighter.SignerClient.DEFAULT_10_MIN_AUTH_EXPIRY
+            )
+            if err is not None:
+                raise Exception(f"Failed to create auth token: {err}")
+
+            # Generate unique client order index (timestamp in milliseconds)
+            client_order_index = int(time.time() * 1000)
+
+            # Get market_id from API
+            market_id = await self._get_market_id_from_api(self.market)
+            if market_id is None:
+                raise ValueError(f"Could not find market_id for {self.market}")
+
+            # Get market info for decimal conversion
+            market_info = self._market_info_cache.get(self.market)
+            if not market_info:
+                raise ValueError(f"Market info not found for {self.market}")
+
+            # Extract decimal precision
+            price_decimals = market_info.get('price_decimals', 0)
+            size_decimals = market_info.get('size_decimals', 0)
+
+            # Convert to integers using decimal precision
+            # Lighter SDK requires integers (fixed-point representation)
+            price_int = int(limit_price * (10 ** price_decimals))
+            base_amount_int = int(size * (10 ** size_decimals))
+
+            print(f"ℹ️  Converting to integers:")
+            print(f"   Price: {limit_price} → {price_int} (decimals: {price_decimals})")
+            print(f"   Size: {size} → {base_amount_int} (decimals: {size_decimals})")
+
+            print(f"   Reduce only: {reduce_only}")
+
+            # Place market order using create_order with ORDER_TYPE_MARKET
+            tx, tx_hash, err = await self.client.create_order(
+                market_index=market_id,
+                client_order_index=client_order_index,
+                base_amount=base_amount_int,  # Integer
+                price=price_int,  # Integer - max acceptable price for market orders
+                is_ask=(side.upper() == 'SELL'),  # True for SELL, False for BUY
+                order_type=lighter.SignerClient.ORDER_TYPE_MARKET,
+                time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,
+                reduce_only=reduce_only,
+                trigger_price=0,
+            )
+
+            if err is not None:
+                raise Exception(f"Order failed: {err}")
+
+            result = {
+                'id': tx_hash,
+                'tx': tx,
+                'status': 'submitted'
+            }
+
+            print(f"✓ Lighter order placed: {side} {size} {self.market}")
+            print(f"  TX Hash: {tx_hash}")
+            print(f"  Price: {limit_price:.4f}")
+
+            return result
+
+        except Exception as e:
+            print(f"❌ Lighter order error: {e}")
+            return None
+
+    def _get_market_index(self, market: str) -> int:
+        """
+        Get market index for a given market symbol
+        Note: These indices need to be verified with Lighter API
+        """
+        # Market indices from Lighter protocol
+        # These should be verified via /api/v1/orderBookDetails
+        market_indices = {
+            'ETH': 0,
+            'BTC': 1,
+            'DOGE': 2,
+            'JUP': 3,  # Jupiter - verify actual index
+            'SOL': 4,
+        }
+        index = market_indices.get(market.upper(), None)
+        if index is None:
+            print(f"⚠ Unknown market {market}, defaulting to index 0")
+            return 0
+        return index
+
+    async def get_order_status(self, order_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get order status
+
+        Args:
+            order_id: Order ID (transaction hash)
+
+        Returns:
+            Order details or None if error
+        """
+        try:
+            if self.client:
+                # Get transaction status
+                api_client = lighter.ApiClient()
+                try:
+                    tx_api = lighter.TransactionApi(api_client)
+                    tx = await tx_api.get_transaction(hash=order_id)
+                    return tx.to_dict() if hasattr(tx, 'to_dict') else tx
+                finally:
+                    await api_client.close()
+            else:
+                print("❌ Lighter SDK required for order status")
+                return None
+
+        except Exception as e:
+            print(f"❌ Lighter order status error: {e}")
+            return None
+
+    async def get_account_balance(self) -> Optional[Dict[str, Any]]:
+        """
+        Get account balance
+
+        Returns:
+            Account balance or None if error
+        """
+        try:
+            if self.client:
+                api_client = lighter.ApiClient()
+                try:
+                    account_api = lighter.AccountApi(api_client)
+                    account = await account_api.account(
+                        by="index",
+                        value=str(self.account_index)
+                    )
+                    return account.to_dict() if hasattr(account, 'to_dict') else account
+                finally:
+                    await api_client.close()
+            else:
+                # Use REST API - public endpoint for account info
+                session = await self._get_session()
+                url = f"{self.base_url}/api/v1/account/{self.account_index}"
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        print(f"ℹ️  Lighter account balance unavailable (SDK required for private data)")
+                        return {"status": "SDK_REQUIRED", "message": "Install Lighter SDK for full account access"}
+
+        except Exception as e:
+            print(f"ℹ️  Lighter balance info unavailable: {e}")
+            return {"status": "UNAVAILABLE"}
+
+    async def get_funding_rate(self) -> Optional[Dict[str, Any]]:
+        """
+        Get current funding rate for the market
+
+        Lighter uses hourly discrete funding with ±0.5% cap per hour
+
+        Returns:
+            Dict with funding rate data:
+            {
+                'funding_rate': float,  # Hourly funding rate (e.g., 0.0001 = 0.01%)
+                'funding_rate_pct': float,  # As percentage (e.g., 0.01)
+                'next_funding_time': int,  # Unix timestamp
+                'market': str
+            }
+            or None if error
+        """
+        try:
+            session = await self._get_session()
+
+            # Try SDK first if available
+            if self.client:
+                try:
+                    api_client = lighter.ApiClient()
+                    try:
+                        candlestick_api = lighter.CandlestickApi(api_client)
+                        req = lighter.ReqGetFundings(market=self.market, limit=1)
+                        fundings = await candlestick_api.fundings(req)
+
+                        if fundings and hasattr(fundings, 'fundings') and len(fundings.fundings) > 0:
+                            latest = fundings.fundings[0]
+                            funding_rate = float(latest.funding_rate) if hasattr(latest, 'funding_rate') else 0
+
+                            return {
+                                'funding_rate': funding_rate,
+                                'funding_rate_pct': funding_rate * 100,
+                                'next_funding_time': getattr(latest, 'timestamp', 0),
+                                'market': self.market,
+                                'source': 'SDK'
+                            }
+                    finally:
+                        await api_client.close()
+                except Exception as sdk_error:
+                    print(f"ℹ️  SDK funding rate query failed, falling back to REST API: {sdk_error}")
+
+            # Fallback to REST API
+            url = f"{self.base_url}/api/v1/fundings?market={self.market}&limit=1"
+
+            async with session.get(url, proxy=self.proxy_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    # Parse response - structure may be {"fundings": [...]} or direct array
+                    fundings_list = data.get('fundings', data) if isinstance(data, dict) else data
+
+                    if fundings_list and len(fundings_list) > 0:
+                        latest = fundings_list[0]
+                        funding_rate = float(latest.get('funding_rate', 0))
+
+                        return {
+                            'funding_rate': funding_rate,
+                            'funding_rate_pct': funding_rate * 100,
+                            'next_funding_time': latest.get('timestamp', 0),
+                            'market': self.market,
+                            'source': 'REST'
+                        }
+                    else:
+                        print(f"⚠️  No funding rate data available for {self.market}")
+                        return None
+                else:
+                    print(f"❌ Failed to fetch funding rate: HTTP {response.status}")
+                    return None
+
+        except Exception as e:
+            print(f"❌ Error fetching Lighter funding rate: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+
+    async def cancel_order(self, order_id: str) -> bool:
+        """
+        Cancel an order
+
+        Args:
+            order_id: Order ID
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if not self.client:
+                print("❌ Lighter SDK required for canceling orders")
+                return False
+
+            # Create auth token
+            auth, err = self.client.create_auth_token_with_expiry(
+                lighter.SignerClient.DEFAULT_10_MIN_AUTH_EXPIRY
+            )
+            if err is not None:
+                raise Exception(f"Failed to create auth token: {err}")
+
+            # Cancel order
+            tx, tx_hash, err = await self.client.cancel_order(
+                market_index=self._get_market_index(self.market),
+                order_index=int(order_id)
+            )
+
+            if err is not None:
+                raise Exception(f"Cancel failed: {err}")
+
+            print(f"✓ Lighter order cancelled: {order_id}")
+            return True
+
+        except Exception as e:
+            print(f"❌ Lighter cancel error: {e}")
+            return False
+
+    async def subscribe_to_account_updates(self, callback):
+        """
+        Subscribe to account updates via WebSocket
+
+        Args:
+            callback: Async function to call when account data is received
+                     Should accept a single parameter: account data dict
+
+        Raises:
+            AttributeError: If subscribe_account method is not available in SDK
+        """
+        if not self.client:
+            raise AttributeError("Lighter SDK client not available")
+
+        # Check if subscribe_account method exists
+        if not hasattr(self.client, 'subscribe_account'):
+            raise AttributeError("subscribe_account method not available in Lighter SDK")
+
+        try:
+            print(f"🔌 Subscribing to account updates for index {self.account_index}...")
+
+            # Subscribe to account updates using Lighter SDK
+            async for account_data in self.client.subscribe_account(
+                account_index=self.account_index
+            ):
+                try:
+                    # Parse account data
+                    if hasattr(account_data, 'to_dict'):
+                        account_dict = account_data.to_dict()
+                    elif isinstance(account_data, dict):
+                        account_dict = account_data
+                    else:
+                        account_dict = vars(account_data)
+
+                    # Debug: Print full account structure on first receive
+                    if not hasattr(self, '_account_structure_logged'):
+                        print(f"\n📊 Account Structure (first update):")
+                        print(json.dumps(account_dict, indent=2, default=str))
+                        self._account_structure_logged = True
+
+                    # Call the callback with account data
+                    await callback(account_dict)
+
+                except Exception as e:
+                    print(f"❌ Error processing account update: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+        except AttributeError:
+            # Re-raise AttributeError so caller can handle it
+            raise
+        except Exception as e:
+            print(f"❌ WebSocket subscription error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+    async def get_position_from_account(self, account_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Extract position information from account data
+
+        Args:
+            account_data: Account data dict from WebSocket or API
+
+        Returns:
+            Position dict with size, entry_price, etc., or None if no position
+        """
+        try:
+            # Check for perp_positions key (most likely location)
+            if 'perp_positions' in account_data:
+                perp_positions = account_data['perp_positions']
+
+                # Get market_id for current market
+                market_id = await self._get_market_id_from_api(self.market)
+                if market_id is None:
+                    return None
+
+                # Find position for our market
+                if isinstance(perp_positions, dict):
+                    position = perp_positions.get(str(market_id))
+                    if position:
+                        return self._parse_position(position)
+
+                elif isinstance(perp_positions, list):
+                    for pos in perp_positions:
+                        if isinstance(pos, dict) and pos.get('market_id') == market_id:
+                            return self._parse_position(pos)
+
+            # Fallback: Check positions array (if it exists)
+            if 'positions' in account_data:
+                positions = account_data['positions']
+                market_id = await self._get_market_id_from_api(self.market)
+
+                if isinstance(positions, list):
+                    for pos in positions:
+                        if isinstance(pos, dict) and pos.get('market_id') == market_id:
+                            return self._parse_position(pos)
+                        elif isinstance(pos, int) and pos == market_id:
+                            # positions array contains only market IDs - need to fetch full data
+                            print("⚠️  positions array contains only market IDs, fetching full account data...")
+                            full_account = await self.get_account_balance()
+                            if full_account:
+                                return await self.get_position_from_account(full_account)
+
+            # No position found
+            return None
+
+        except Exception as e:
+            print(f"❌ Error extracting position from account data: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _parse_position(self, position_data: Any) -> Dict[str, Any]:
+        """
+        Parse position data into standard format
+
+        Args:
+            position_data: Raw position data (dict or object)
+
+        Returns:
+            Standardized position dict
+        """
+        if hasattr(position_data, 'to_dict'):
+            pos = position_data.to_dict()
+        elif isinstance(position_data, dict):
+            pos = position_data
+        else:
+            pos = vars(position_data)
+
+        # Extract key fields
+        size = float(pos.get('size', 0) or pos.get('base_amount', 0) or 0)
+        entry_price = float(pos.get('entry_price', 0) or pos.get('avg_entry_price', 0) or 0)
+        market_id = pos.get('market_id', None)
+
+        return {
+            'size': size,
+            'entry_price': entry_price,
+            'market_id': market_id,
+            'raw': pos  # Keep raw data for debugging
+        }
+
+    async def close(self):
+        """Close client session"""
+        # Close aiohttp session if it exists
+        if self._session and not self._session.closed:
+            await self._session.close()
+        # Lighter SDK doesn't require explicit cleanup
