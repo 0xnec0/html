@@ -1,0 +1,16 @@
+# テスト用: 最新バージョンで依存関係競合を解決
+# Option D: 最新pre-release + lighter-sdk
+
+# Paradex SDK（最新pre-release含む）
+paradex_py>=0.4.6
+
+# Lighter SDK（公式最新版）
+lighter-sdk>=0.1.4
+
+# 共通依存関係（自動解決を試みる）
+python-dotenv>=1.0.1
+aiohttp>=3.9.0
+websockets>=12.0
+
+# もし競合が出た場合は以下のように特定バージョンを指定
+# eth-account==0.13.4  # lighter-sdk互換
