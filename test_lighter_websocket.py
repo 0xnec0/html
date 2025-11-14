@@ -53,9 +53,8 @@ async def test_lighter_websocket():
         base_url = os.getenv('LIGHTER_BASE_URL', 'https://mainnet.zklighter.elliot.ai')
         ws_url = base_url.replace('https://', 'wss://').replace('http://', 'ws://')
 
-        # WebSocketエンドポイント
-        # 注: 実際のエンドポイントはLighter APIドキュメントを参照
-        ws_endpoint = f"{ws_url}/ws"
+        # WebSocketエンドポイント（Lighter公式: /stream）
+        ws_endpoint = f"{ws_url}/stream"
 
         print(f"   WebSocket URL: {ws_endpoint}")
 
