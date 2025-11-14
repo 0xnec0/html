@@ -20,10 +20,10 @@ class LighterSigner:
     ORDER_TYPE_STOP_LOSS = 2
     ORDER_TYPE_TAKE_PROFIT = 3
 
-    # Time In Force定数
-    ORDER_TIME_IN_FORCE_GOOD_TILL_TIME = 0
-    ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL = 1
-    ORDER_TIME_IN_FORCE_FILL_OR_KILL = 2
+    # Time In Force定数（lighter-python準拠）
+    ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL = 0  # IOC - 即時実行またはキャンセル
+    ORDER_TIME_IN_FORCE_GOOD_TILL_TIME = 1       # GTT - 期限まで有効
+    ORDER_TIME_IN_FORCE_POST_ONLY = 2            # Post-only (maker注文)
 
     # デフォルト有効期限
     DEFAULT_28_DAY_ORDER_EXPIRY = 28 * 24 * 60 * 60  # 28日（秒）
