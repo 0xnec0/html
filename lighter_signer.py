@@ -65,31 +65,22 @@ class LighterSigner:
     def _setup_functions(self):
         """ctypes関数シグネチャ設定"""
 
-        # StrOrErr構造体の定義（戻り値用）
-        class StrOrErr(ctypes.Structure):
-            _fields_ = [
-                ("result", ctypes.c_char_p),
-                ("error", ctypes.c_char_p),
-            ]
-
-        self.StrOrErr = StrOrErr
-
         # CreateClient関数（lighter-pythonの正しい方法）
         self.signer.CreateClient.argtypes = [
-            ctypes.c_char_p,  # url
-            ctypes.c_char_p,  # private_key
-            ctypes.c_int,     # chain_id
-            ctypes.c_int,     # api_key_index
-            ctypes.c_int,     # account_index
+            ctypes.c_char_p,    # url
+            ctypes.c_char_p,    # private_key
+            ctypes.c_int,       # chain_id
+            ctypes.c_int,       # api_key_index
+            ctypes.c_longlong,  # account_index（c_intではなくc_longlong！）
         ]
-        self.signer.CreateClient.restype = StrOrErr
+        self.signer.CreateClient.restype = ctypes.c_char_p  # エラー文字列またはNone
 
         # クライアント作成（秘密鍵で初期化）
         # Lighter mainnet: chain_id = 1
         base_url = "https://mainnet.zklighter.elliot.ai"
         chain_id = 1  # mainnet
 
-        result = self.signer.CreateClient(
+        err = self.signer.CreateClient(
             base_url.encode('utf-8'),
             self.private_key.encode('utf-8'),
             chain_id,
@@ -97,10 +88,21 @@ class LighterSigner:
             self.account_index
         )
 
-        if result.error:
-            raise RuntimeError(f"Signer initialization failed: {result.error.decode('utf-8')}")
+        # Noneなら成功、それ以外はエラー
+        if err is not None:
+            err_str = err.decode('utf-8')
+            raise RuntimeError(f"Signer initialization failed: {err_str}")
 
         print(f"✓ Signer initialized for account {self.account_index}")
+
+        # StrOrErr構造体の定義（他の署名関数用）
+        class StrOrErr(ctypes.Structure):
+            _fields_ = [
+                ("result", ctypes.c_char_p),
+                ("error", ctypes.c_char_p),
+            ]
+
+        self.StrOrErr = StrOrErr
 
         # SignCreateOrder関数
         self.signer.SignCreateOrder.argtypes = [
