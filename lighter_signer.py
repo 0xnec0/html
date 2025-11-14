@@ -162,9 +162,9 @@ class LighterSigner:
             (署名済みトランザクションJSON, エラーメッセージ)
         """
         if order_expiry is None:
-            # order_expiryは絶対時刻（Unixタイムスタンプ）
-            # 現在時刻 + 1時間（3600秒）
-            order_expiry = int(time.time()) + 3600
+            # order_expiryは -1 を渡すことで、lighter-goバイナリ側で
+            # 自動的に28日間の有効期限が設定される
+            order_expiry = -1
 
         try:
             result = self.signer.SignCreateOrder(
