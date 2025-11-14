@@ -74,12 +74,29 @@ class LighterSigner:
 
         self.StrOrErr = StrOrErr
 
-        # Initialize関数
-        self.signer.Initialize.argtypes = [ctypes.c_char_p]
-        self.signer.Initialize.restype = StrOrErr
+        # CreateClient関数（lighter-pythonの正しい方法）
+        self.signer.CreateClient.argtypes = [
+            ctypes.c_char_p,  # url
+            ctypes.c_char_p,  # private_key
+            ctypes.c_int,     # chain_id
+            ctypes.c_int,     # api_key_index
+            ctypes.c_int,     # account_index
+        ]
+        self.signer.CreateClient.restype = StrOrErr
 
-        # 秘密鍵で初期化
-        result = self.signer.Initialize(self.private_key.encode('utf-8'))
+        # クライアント作成（秘密鍵で初期化）
+        # Lighter mainnet: chain_id = 1
+        base_url = "https://mainnet.zklighter.elliot.ai"
+        chain_id = 1  # mainnet
+
+        result = self.signer.CreateClient(
+            base_url.encode('utf-8'),
+            self.private_key.encode('utf-8'),
+            chain_id,
+            self.api_key_index,
+            self.account_index
+        )
+
         if result.error:
             raise RuntimeError(f"Signer initialization failed: {result.error.decode('utf-8')}")
 
