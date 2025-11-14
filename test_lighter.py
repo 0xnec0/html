@@ -36,23 +36,42 @@ async def test_lighter_connection():
                     markets = await response.json()
                     print(f"   ✅ 市場データ取得成功")
 
+                    # デバッグ: レスポンス構造を表示
+                    print(f"   🔍 レスポンスタイプ: {type(markets)}")
+                    if isinstance(markets, dict):
+                        print(f"   🔍 レスポンスキー: {list(markets.keys())}")
+                        print(f"   🔍 レスポンス内容（最初の200文字）: {str(markets)[:200]}...")
+                    elif isinstance(markets, list):
+                        print(f"   🔍 リスト長: {len(markets)}")
+
                     # レスポンスがリストかdictか確認
                     if isinstance(markets, dict) and 'data' in markets:
                         markets_list = markets['data']
                     elif isinstance(markets, list):
                         markets_list = markets
                     else:
+                        # dictだけど'data'キーがない場合、他のキーを探す
                         markets_list = []
+                        if isinstance(markets, dict):
+                            # よくあるキー名を試す
+                            for key in ['results', 'order_books', 'orderBooks', 'markets']:
+                                if key in markets:
+                                    markets_list = markets[key]
+                                    print(f"   💡 '{key}'キーでデータ発見！")
+                                    break
 
                     print(f"   利用可能市場数: {len(markets_list)}個\n")
 
                     # 最初の3つの市場を表示
-                    print("   主要市場:")
-                    for i, market in enumerate(markets_list[:3]):
-                        # orderBook IDとシンボル情報を表示
-                        order_book_id = market.get('order_book_id', market.get('id', i))
-                        symbol = market.get('symbol', f"OrderBook-{order_book_id}")
-                        print(f"     {i+1}. {symbol} (ID: {order_book_id})")
+                    if markets_list:
+                        print("   主要市場:")
+                        for i, market in enumerate(markets_list[:3]):
+                            # orderBook IDとシンボル情報を表示
+                            order_book_id = market.get('order_book_id', market.get('id', i))
+                            symbol = market.get('symbol', f"OrderBook-{order_book_id}")
+                            print(f"     {i+1}. {symbol} (ID: {order_book_id})")
+                    else:
+                        print("   ⚠️  市場データが空です")
                 else:
                     print(f"   ⚠️  HTTP {response.status}: {await response.text()}")
 
