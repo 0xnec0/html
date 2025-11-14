@@ -28,46 +28,50 @@ async def test_lighter_connection():
             # 2. 市場情報取得（公開エンドポイント）
             print("2️⃣ 市場情報取得中...")
 
-            markets_url = f"{base_url}/get_all_markets"
+            # Lighter API正式エンドポイント
+            markets_url = f"{base_url}/api/v1/orderBooks"
 
             async with session.get(markets_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     markets = await response.json()
                     print(f"   ✅ 市場データ取得成功")
-                    print(f"   利用可能市場数: {len(markets)}個\n")
+
+                    # レスポンスがリストかdictか確認
+                    if isinstance(markets, dict) and 'data' in markets:
+                        markets_list = markets['data']
+                    elif isinstance(markets, list):
+                        markets_list = markets
+                    else:
+                        markets_list = []
+
+                    print(f"   利用可能市場数: {len(markets_list)}個\n")
 
                     # 最初の3つの市場を表示
                     print("   主要市場:")
-                    for i, market in enumerate(markets[:3]):
-                        market_id = market.get('market_id', i)
-                        symbol = market.get('symbol', 'N/A')
-                        print(f"     {i+1}. Market {market_id}: {symbol}")
+                    for i, market in enumerate(markets_list[:3]):
+                        # orderBook IDとシンボル情報を表示
+                        order_book_id = market.get('order_book_id', market.get('id', i))
+                        symbol = market.get('symbol', f"OrderBook-{order_book_id}")
+                        print(f"     {i+1}. {symbol} (ID: {order_book_id})")
                 else:
                     print(f"   ⚠️  HTTP {response.status}: {await response.text()}")
 
-            # 3. ヘルスチェック（あれば）
-            print(f"\n3️⃣ API ヘルスチェック...")
+            # 3. ステータスチェック
+            print(f"\n3️⃣ APIステータスチェック...")
 
-            # Lighterの公開エンドポイントを試す
-            health_endpoints = [
-                f"{base_url}/health",
-                f"{base_url}/api/health",
-                f"{base_url}/v1/health",
-            ]
+            # Lighterのステータスエンドポイント
+            status_url = f"{base_url}/"
 
-            health_ok = False
-            for endpoint in health_endpoints:
-                try:
-                    async with session.get(endpoint, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                        if response.status == 200:
-                            print(f"   ✅ ヘルスチェック成功: {endpoint}")
-                            health_ok = True
-                            break
-                except:
-                    continue
-
-            if not health_ok:
-                print(f"   ℹ️  ヘルスエンドポイントなし（正常）")
+            try:
+                async with session.get(status_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    if response.status == 200:
+                        status_data = await response.json()
+                        print(f"   ✅ ステータス取得成功")
+                        print(f"   データ: {status_data}")
+                    else:
+                        print(f"   ⚠️  ステータス確認: HTTP {response.status}")
+            except Exception as e:
+                print(f"   ℹ️  ステータスエンドポイント利用不可（問題なし）")
 
             print("\n" + "="*60)
             print("🎉 Lighter REST API 接続テスト完了！")
