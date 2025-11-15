@@ -35,28 +35,53 @@ async def test_paradex_market_order():
         print(f"   ✅ SDK初期化成功")
         print(f"   L2 Address: {hex(paradex.account.l2_address)}\n")
 
-        # 2. 市場情報取得（ライブ価格）
-        print("2️⃣ 市場情報取得中（ライブ価格）...")
+        # 2. 市場情報取得
+        print("2️⃣ 市場情報取得中...")
         test_market = os.getenv('TEST_PARADEX_MARKET', 'BTC-USD-PERP')
 
-        # fetch_markets_summary() でライブ価格を取得
-        # market='ALL' で全市場のサマリを取得
-        markets_summary = paradex.api_client.fetch_markets_summary(market='ALL')
+        # fetch_markets() で市場設定を取得
+        markets = paradex.api_client.fetch_markets()
 
         # 市場データ検索
-        market_info = None
-        if isinstance(markets_summary, dict) and 'results' in markets_summary:
-            for market in markets_summary['results']:
+        market_config = None
+        if isinstance(markets, dict) and 'results' in markets:
+            for market in markets['results']:
                 if market.get('symbol') == test_market:
-                    market_info = market
+                    market_config = market
+                    break
+        elif isinstance(markets, list):
+            for market in markets:
+                if market.get('symbol') == test_market:
+                    market_config = market
                     break
 
-        if not market_info:
+        if not market_config:
             print(f"❌ 市場 {test_market} が見つかりません")
             return
 
-        mark_price = float(market_info.get('mark_price', 0))
-        min_order_size = float(market_info.get('min_order_size', 0))
+        # 市場設定から情報取得
+        min_order_size = float(market_config.get('min_order_size', 0))
+
+        # ライブ価格は別途取得（オーダーブックから）
+        try:
+            orderbook = paradex.api_client.fetch_orderbook(market=test_market)
+
+            # 最良気配値から現在価格を推定
+            if orderbook and isinstance(orderbook, dict):
+                bids = orderbook.get('bids', [])
+                asks = orderbook.get('asks', [])
+
+                if bids and asks:
+                    best_bid = float(bids[0][0]) if bids[0] else 0
+                    best_ask = float(asks[0][0]) if asks[0] else 0
+                    mark_price = (best_bid + best_ask) / 2
+                else:
+                    mark_price = 0
+            else:
+                mark_price = 0
+        except Exception as e:
+            print(f"   ⚠️  価格取得エラー: {e}")
+            mark_price = 0
 
         print(f"   ✅ 市場情報取得成功")
         print(f"   市場: {test_market}")
