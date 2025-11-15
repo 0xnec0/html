@@ -11,7 +11,7 @@ import time
 from decimal import Decimal
 from dotenv import load_dotenv
 from paradex_py import Paradex
-from paradex_py.common import Order, OrderSide, OrderType
+from paradex_py.common.order import Order, OrderSide, OrderType
 from paradex_py.environment import PROD
 
 # 環境変数読み込み
