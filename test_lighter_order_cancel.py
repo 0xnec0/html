@@ -85,8 +85,8 @@ async def main():
     # 2. 安全な注文パラメータ計算（絶対に約定しない価格）
     print("2️⃣ 安全な注文パラメータ計算中...")
 
-    # 買い注文：最終価格の150%（約定しない）
-    safe_buy_price = last_price * 1.5
+    # 買い注文：最終価格の70%（市場価格より低いので約定しない）
+    safe_buy_price = last_price * 0.7
     buy_size = target_usd / safe_buy_price
 
     # 最小数量チェック
@@ -98,12 +98,12 @@ async def main():
     buy_size_int = int(buy_size * (10 ** size_decimals))
 
     print(f"   ✅ 注文パラメータ:")
-    print(f"   価格: ${safe_buy_price:.6f} (150% of last price)")
+    print(f"   価格: ${safe_buy_price:.6f} (70% of last price)")
     print(f"   価格(整数): {safe_buy_price_int}")
     print(f"   数量: {buy_size:.6f}")
     print(f"   数量(整数): {buy_size_int}")
     print(f"   合計: 約${buy_size * safe_buy_price:.2f}")
-    print(f"   💡 最終価格の150%なので絶対に約定しません！\n")
+    print(f"   💡 最終価格の70%（市場価格より低い）なので絶対に約定しません！\n")
 
     # 3. 署名準備
     print("3️⃣ 注文署名準備中...")
