@@ -40,7 +40,8 @@ async def test_paradex_market_order():
         test_market = os.getenv('TEST_PARADEX_MARKET', 'BTC-USD-PERP')
 
         # fetch_markets_summary() でライブ価格を取得
-        markets_summary = paradex.api_client.fetch_markets_summary()
+        # market='ALL' で全市場のサマリを取得
+        markets_summary = paradex.api_client.fetch_markets_summary(market='ALL')
 
         # 市場データ検索
         market_info = None
