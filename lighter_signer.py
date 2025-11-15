@@ -252,6 +252,35 @@ class LighterSigner:
             return None, str(e)
 
 
+def get_proxy_url() -> Optional[str]:
+    """
+    環境変数からプロキシURLを構築
+
+    Returns:
+        プロキシURL（無効の場合None）
+    """
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    proxy_enabled = os.getenv('PROXY_ENABLED', 'false').lower() == 'true'
+    if not proxy_enabled:
+        return None
+
+    server = os.getenv('PROXY_SERVER', '')
+    port = os.getenv('PROXY_PORT', '')
+    username = os.getenv('PROXY_USERNAME', '')
+    password = os.getenv('PROXY_PASSWORD', '')
+
+    if not server or not port:
+        return None
+
+    if username and password:
+        return f"http://{username}:{password}@{server}:{port}"
+    else:
+        return f"http://{server}:{port}"
+
+
 async def get_next_nonce(base_url: str, account_index: int, api_key_index: int) -> int:
     """
     Lighter APIから次のnonceを取得
@@ -272,8 +301,10 @@ async def get_next_nonce(base_url: str, account_index: int, api_key_index: int) 
         'api_key_index': api_key_index
     }
 
+    proxy_url = get_proxy_url()
+
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params) as response:
+        async with session.get(url, params=params, proxy=proxy_url) as response:
             if response.status == 200:
                 data = await response.json()
                 return data['nonce']
@@ -303,8 +334,10 @@ async def send_transaction(base_url: str, tx_json: str, tx_type: int) -> dict:
     form_data.add_field('tx_type', str(tx_type))
     form_data.add_field('tx_info', tx_json)
 
+    proxy_url = get_proxy_url()
+
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, data=form_data) as response:
+        async with session.post(url, data=form_data, proxy=proxy_url) as response:
             if response.status == 200:
                 return await response.json()
             else:

@@ -5,8 +5,7 @@ Paradex接続テスト - 超シンプル版
 """
 import os
 from dotenv import load_dotenv
-from paradex_py import Paradex
-from paradex_py.environment import PROD  # 定数をインポート
+from paradex_client import create_paradex_client
 
 # 環境変数読み込み
 load_dotenv()
@@ -18,13 +17,9 @@ def test_paradex_connection():
     print("="*60 + "\n")
 
     try:
-        # 1. SDK初期化
+        # 1. SDK初期化（プロキシサポート付き）
         print("1️⃣ SDK初期化中...")
-        paradex = Paradex(
-            env=PROD,  # Mainnet ("prod"文字列)
-            l1_address=os.getenv('PARADEX_L1_ADDRESS'),
-            l1_private_key=os.getenv('PARADEX_L1_PRIVATE_KEY')
-        )
+        paradex = create_paradex_client()
         print("   ✅ SDK初期化成功\n")
 
         # 2. アカウント情報表示

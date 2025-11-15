@@ -10,9 +10,8 @@ import asyncio
 import time
 from decimal import Decimal
 from dotenv import load_dotenv
-from paradex_py import Paradex
+from paradex_client import create_paradex_client
 from paradex_py.common.order import Order, OrderSide, OrderType
-from paradex_py.environment import PROD
 
 # 環境変数読み込み
 load_dotenv()
@@ -25,13 +24,9 @@ async def test_paradex_market_order():
     print()
 
     try:
-        # 1. SDK初期化
+        # 1. SDK初期化（プロキシサポート付き）
         print("1️⃣ SDK初期化中...")
-        paradex = Paradex(
-            env=PROD,
-            l1_address=os.getenv('PARADEX_L1_ADDRESS'),
-            l1_private_key=os.getenv('PARADEX_L1_PRIVATE_KEY')
-        )
+        paradex = create_paradex_client()
         print(f"   ✅ SDK初期化成功")
         print(f"   L2 Address: {hex(paradex.account.l2_address)}\n")
 
