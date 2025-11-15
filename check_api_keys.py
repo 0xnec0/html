@@ -29,6 +29,13 @@ async def check_api_keys():
                 return
 
             data = await response.json()
+
+            # デバッグ: 生データを表示
+            print("📋 APIレスポンス（生データ）:")
+            import json
+            print(json.dumps(data, indent=2))
+            print()
+
             accounts = data.get('sub_accounts', [])
 
             if not accounts:
@@ -38,8 +45,8 @@ async def check_api_keys():
             print(f"✅ {len(accounts)}個のアカウントが見つかりました\n")
 
             for acc in accounts:
-                acc_index = acc.get('account_index')
-                acc_type = acc.get('account_type')
+                acc_index = acc.get('account_index') or acc.get('index')
+                acc_type = acc.get('account_type') or acc.get('type')
 
                 print("="*60)
                 print(f"📊 Account Index: {acc_index}")
