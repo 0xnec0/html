@@ -59,8 +59,17 @@ async def test_paradex_market_order():
             print(f"❌ 市場 {test_market} が見つかりません")
             return
 
-        # 市場設定から情報取得
-        min_order_size = float(market_config.get('min_order_size', 0))
+        # デバッグ: market_configの中身を確認
+        print(f"   [DEBUG] market_config keys: {list(market_config.keys())[:10]}")
+
+        # 市場設定から情報取得（複数のフィールド名を試す）
+        min_order_size = (
+            float(market_config.get('min_order_size', 0)) or
+            float(market_config.get('min_size', 0)) or
+            float(market_config.get('minimum_order_size', 0)) or
+            float(market_config.get('min_order_qty', 0)) or
+            0.001  # デフォルト値
+        )
 
         # ライブ価格は別途取得（オーダーブックから）
         try:
